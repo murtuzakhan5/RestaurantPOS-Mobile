@@ -1,4 +1,3 @@
-import qz from 'qz-tray';
 
 const WEB_PRINTER_KEY = 'billpak_web_printer_settings';
 const API_URL = 'https://billpak.runasp.net/api';
@@ -11,6 +10,18 @@ const defaultWebPrinterSettings = {
 };
 
 let qzSecurityReady = false;
+let _qz = null;
+
+const getQz = async () => {
+  if (_qz) return _qz;
+  try {
+    _qz = (await import('qz-tray')).default;
+    return _qz;
+  } catch (e) {
+    console.warn('QZ Tray not available:', e.message);
+    return null;
+  }
+};
 
 const setupQzSecurity = () => {
   if (qzSecurityReady) return;
@@ -724,7 +735,10 @@ export const connectQzTray = async () => {
   if (qz.websocket.isActive()) return true;
 
   try {
-    await qz.websocket.connect({ retries: 3, delay: 1 });
+    // await qz.websocket.connect({ retries: 3, delay: 1 });
+    const qz = await getQz();
+    if (!qz) { console.warn('QZ not available'); return; }
+    await qz.websocket.connect();
     return true;
   } catch {
     throw new Error('QZ Tray connect nahi ho raha');
