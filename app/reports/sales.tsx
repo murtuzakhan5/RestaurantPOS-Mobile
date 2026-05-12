@@ -9,18 +9,12 @@ import {
   Alert,
   Pressable,
   ActivityIndicator,
-  Dimensions,
 } from 'react-native';
 import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { StatusBar } from 'expo-status-bar';
 import api from '../services/api';
-
-const { width } = Dimensions.get('window');
-const isTablet = width >= 768;
 
 interface SaleItem {
   productId?: number;
@@ -135,22 +129,17 @@ export default function SalesReportScreen() {
 
   const setTodayRange = () => {
     const now = new Date();
-    const newStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-    const newEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-    setStartDate(newStart);
-    setEndDate(newEnd);
-    console.log('Today range set:', newStart, newEnd);
+    setStartDate(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0));
+    setEndDate(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59));
   };
 
   const setLast7DaysRange = () => {
     const now = new Date();
     const start = new Date(now);
     start.setDate(start.getDate() - 6);
-    const newStart = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0);
-    const newEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-    setStartDate(newStart);
-    setEndDate(newEnd);
-    console.log('Last 7 days range set:', newStart, newEnd);
+
+    setStartDate(new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0));
+    setEndDate(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59));
   };
 
   const buildCashierSummary = (records: SaleRecord[]) => {
@@ -198,17 +187,12 @@ export default function SalesReportScreen() {
   };
 
   const filterData = () => {
-    console.log('Filtering data with dates:', startDate, endDate);
-    console.log('Total sales data:', salesData.length);
-
     const dateAndTypeFiltered = salesData.filter(sale => {
       const saleDate = new Date(sale.timestamp);
       const dateOk = saleDate >= startDate && saleDate <= endDate;
       const typeOk = selectedType === 'all' || sale.type === selectedType;
       return dateOk && typeOk;
     });
-
-    console.log('Date and type filtered:', dateAndTypeFiltered.length);
 
     const cashierWise = buildCashierSummary(dateAndTypeFiltered);
     setCashierSummary(cashierWise);
@@ -292,6 +276,7 @@ export default function SalesReportScreen() {
 
   const removeSaleFromLocalReport = async (saleId: string) => {
     const updated = salesData.filter(sale => sale.id !== saleId);
+
     await AsyncStorage.setItem('sales_records', JSON.stringify(updated));
     setSalesData(updated);
   };
@@ -413,12 +398,14 @@ export default function SalesReportScreen() {
     if (Platform.OS === 'web') {
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
+
       const link = document.createElement('a');
       link.href = url;
       link.download = `${namePrefix}-${startDate.toISOString().split('T')[0]}-to-${endDate.toISOString().split('T')[0]}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+
       URL.revokeObjectURL(url);
     } else {
       Alert.alert(
@@ -456,27 +443,46 @@ export default function SalesReportScreen() {
     exportCSV(records, `cashier-${cashierName.replace(/\s+/g, '-').toLowerCase()}-sales`);
   };
 
-  // FIXED: Date picker with proper state updates
-  const handleStartDateChange = (dateString: string) => {
-    const date = new Date(dateString);
-    const newStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
-    setStartDate(newStart);
-    console.log('Start date changed:', newStart);
-  };
+  const WebDatePicker = ({ value, onChange, label }: any) => (
+    <View style={styles.webDatePicker}>
+      <Text style={styles.dateLabel}>{label}</Text>
+      <input
+        type="date"
+        value={value.toISOString().split('T')[0]}
+        onChange={(e: any) => {
+          const date = new Date(e.target.value);
 
-  const handleEndDateChange = (dateString: string) => {
-    const date = new Date(dateString);
-    const newEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
-    setEndDate(newEnd);
-    console.log('End date changed:', newEnd);
-  };
+          if (label === 'From') {
+            onChange(new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0));
+          } else {
+            onChange(new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59));
+          }
+        }}
+        style={{
+          padding: 9,
+          borderRadius: 8,
+          border: '1px solid #ddd',
+          fontSize: 14,
+          width: '100%',
+        }}
+      />
+    </View>
+  );
 
   const FilterButton = ({ title, value }: { title: string; value: FilterType }) => (
     <TouchableOpacity
-      style={[styles.filterBtn, selectedType === value && styles.filterBtnActive]}
+      style={[
+        styles.filterBtn,
+        selectedType === value && styles.filterBtnActive,
+      ]}
       onPress={() => setSelectedType(value)}
     >
-      <Text style={[styles.filterBtnText, selectedType === value && styles.filterBtnTextActive]}>
+      <Text
+        style={[
+          styles.filterBtnText,
+          selectedType === value && styles.filterBtnTextActive,
+        ]}
+      >
         {title}
       </Text>
     </TouchableOpacity>
@@ -484,14 +490,18 @@ export default function SalesReportScreen() {
 
   const CashierFilterButton = ({ title, value }: { title: string; value: string }) => (
     <TouchableOpacity
-      style={[styles.cashierFilterBtn, selectedCashier === value && styles.cashierFilterBtnActive]}
+      style={[
+        styles.cashierFilterBtn,
+        selectedCashier === value && styles.cashierFilterBtnActive,
+      ]}
       onPress={() => setSelectedCashier(value)}
     >
       <Ionicons
         name="person-outline"
         size={14}
-        color={selectedCashier === value ? '#fff' : '#1A5F2B'}
+        color={selectedCashier === value ? '#fff' : '#4a55a2'}
       />
+
       <Text
         style={[
           styles.cashierFilterText,
@@ -518,429 +528,883 @@ export default function SalesReportScreen() {
     const isCanceling = cancelingId === item.id;
 
     return (
-      <LinearGradient colors={['#FFFFFF', '#F8FAFC']} style={styles.saleCard}>
-        <View style={styles.saleCardHeader}>
-          <View style={styles.saleInfo}>
-            <Text style={styles.saleId}>{item.id.slice(-12)}</Text>
+      <View style={styles.saleCard}>
+        <View style={styles.saleTop}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.saleId}>{item.id}</Text>
+
             {!!item.orderNumber && (
-              <View style={styles.orderBadge}>
-                <Ionicons name="receipt-outline" size={10} color="#F5A623" />
-                <Text style={styles.orderNumberText}>Order: {item.orderNumber}</Text>
-              </View>
+              <Text style={styles.orderNumberText}>Order: {item.orderNumber}</Text>
             )}
+
             {backendOrderId ? (
-              <View style={styles.backendBadge}>
-                <Ionicons name="cloud-done-outline" size={10} color="#22C55E" />
-                <Text style={styles.backendText}>Backend ID: {backendOrderId}</Text>
-              </View>
+              <Text style={styles.backendText}>Backend ID: {backendOrderId}</Text>
             ) : (
-              <View style={styles.warningBadge}>
-                <Ionicons name="warning-outline" size={10} color="#EF4444" />
-                <Text style={styles.warningText}>Local only</Text>
-              </View>
+              <Text style={styles.warningText}>Old/local record: no backend id</Text>
             )}
+
             <Text style={styles.saleDate}>{formatDateTime(item.timestamp)}</Text>
-            <View style={styles.cashierChip}>
-              <Ionicons name="person-outline" size={10} color="#1A5F2B" />
-              <Text style={styles.cashierText}>{getCashierName(item)}</Text>
-            </View>
+            <Text style={styles.cashierText}>Cashier: {getCashierName(item)}</Text>
           </View>
 
           <View style={styles.saleActions}>
-            <View style={[styles.typeChip, item.type === 'dinein' ? styles.dineinChip : styles.takeawayChip]}>
-              <Ionicons name={item.type === 'dinein' ? 'restaurant' : 'cart'} size={12} color="#FFF" />
-              <Text style={styles.typeChipText}>{item.type === 'dinein' ? 'Dine-In' : 'Takeaway'}</Text>
+            <View
+              style={[
+                styles.typeBadge,
+                item.type === 'dinein' ? styles.dineinBadge : styles.takeawayBadge,
+              ]}
+            >
+              <Text style={styles.typeBadgeText}>
+                {item.type === 'dinein' ? 'Dine-In' : 'Takeaway'}
+              </Text>
             </View>
 
             <Pressable
-              style={({ pressed }) => [styles.deleteBtn, pressed && { opacity: 0.7 }, isCanceling && { opacity: 0.5 }]}
+              style={({ pressed }) => [
+                styles.deleteBtn,
+                pressed && { opacity: 0.7 },
+                isCanceling && { opacity: 0.5 },
+              ]}
               disabled={isCanceling}
               onPress={() => deleteSaleRecord(item)}
             >
               {isCanceling ? (
-                <ActivityIndicator size="small" color="#FFF" />
+                <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Ionicons name="trash-outline" size={18} color="#FFF" />
+                <Ionicons name="trash-outline" size={17} color="#fff" />
               )}
             </Pressable>
           </View>
         </View>
 
         {item.type === 'dinein' && (
-          <View style={styles.tableRow}>
-            <Ionicons name="table-landscape" size={14} color="#F5A623" />
-            <Text style={styles.tableText}>Table: {item.tableNumber || '-'}</Text>
-          </View>
+          <Text style={styles.tableText}>Table: {item.tableNumber || '-'}</Text>
         )}
 
-        <View style={styles.itemsContainer}>
+        <View style={styles.saleItemsBox}>
           {item.items.map((food, index) => (
-            <View key={index} style={styles.itemRow}>
-              <Text style={styles.itemName}>{food.name}</Text>
-              <Text style={styles.itemQty}>x{food.quantity}</Text>
-              <Text style={styles.itemAmount}>₨ {(Number(food.price) * Number(food.quantity)).toFixed(0)}</Text>
+            <View key={index} style={styles.saleItemRow}>
+              <Text style={styles.saleItemName}>{food.name}</Text>
+              <Text style={styles.saleItemQty}>x{food.quantity}</Text>
+              <Text style={styles.saleItemAmount}>
+                Rs {(Number(food.price) * Number(food.quantity)).toFixed(0)}
+              </Text>
             </View>
           ))}
         </View>
 
-        <View style={styles.divider} />
-
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Bill Total</Text>
-          <Text style={styles.totalAmount}>₨ {Number(item.total).toFixed(2)}</Text>
+        <View style={styles.saleTotalRow}>
+          <Text style={styles.saleTotalLabel}>Bill Total</Text>
+          <Text style={styles.saleTotalValue}>Rs {Number(item.total).toFixed(2)}</Text>
         </View>
-      </LinearGradient>
+      </View>
     );
   };
 
   return (
-    <>
-      <StatusBar style="light" />
-      <View style={styles.container}>
-        {/* Premium Header */}
-        <LinearGradient colors={['#0F172A', '#1A5F2B', '#0D3D1C']} style={styles.header}>
-          <View style={styles.headerTop}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-              <Ionicons name="arrow-back" size={24} color="#FFF" />
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
+
+        <Text style={styles.headerTitle}>Sales Report</Text>
+
+        <TouchableOpacity onPress={loadSalesData}>
+          <Ionicons name="refresh" size={24} color="#333" />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: 30 }}>
+        <View style={styles.dateContainer}>
+          <Text style={styles.sectionTitle}>Date Range</Text>
+
+          <View style={styles.quickRow}>
+            <TouchableOpacity style={styles.quickBtn} onPress={setTodayRange}>
+              <Text style={styles.quickBtnText}>Today</Text>
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Sales Report</Text>
-            <TouchableOpacity onPress={loadSalesData} style={styles.refreshBtn}>
-              <Ionicons name="refresh" size={22} color="#FFF" />
+
+            <TouchableOpacity style={styles.quickBtn} onPress={setLast7DaysRange}>
+              <Text style={styles.quickBtnText}>Last 7 Days</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.headerSubtitle}>Track your business performance</Text>
-        </LinearGradient>
 
-        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-          {/* Date Range Card - FIXED */}
-          <LinearGradient colors={['#FFFFFF', '#F8FAFC']} style={styles.dateCard}>
-            <Text style={styles.cardTitle}>📅 Date Range</Text>
-            <View style={styles.quickButtons}>
-              <TouchableOpacity style={styles.quickBtn} onPress={setTodayRange}>
-                <Text style={styles.quickBtnText}>Today</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickBtn} onPress={setLast7DaysRange}>
-                <Text style={styles.quickBtnText}>Last 7 Days</Text>
-              </TouchableOpacity>
-            </View>
-            
-            {/* FIXED: Web Date Pickers */}
+          <View style={styles.dateRange}>
             {Platform.OS === 'web' ? (
-              <View style={styles.webDateRow}>
-                <View style={styles.webDatePicker}>
-                  <Text style={styles.dateLabel}>From</Text>
-                  <input
-                    type="date"
-                    value={startDate.toISOString().split('T')[0]}
-                    onChange={(e) => handleStartDateChange(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: 12,
-                      border: '1px solid #E2E8F0',
-                      fontSize: 14,
-                      backgroundColor: '#F8FAFC',
-                      fontFamily: 'inherit',
-                    }}
-                  />
-                </View>
-                <View style={styles.webDatePicker}>
-                  <Text style={styles.dateLabel}>To</Text>
-                  <input
-                    type="date"
-                    value={endDate.toISOString().split('T')[0]}
-                    onChange={(e) => handleEndDateChange(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: 12,
-                      border: '1px solid #E2E8F0',
-                      fontSize: 14,
-                      backgroundColor: '#F8FAFC',
-                      fontFamily: 'inherit',
-                    }}
-                  />
-                </View>
-              </View>
+              <>
+                <WebDatePicker value={startDate} onChange={setStartDate} label="From" />
+                <WebDatePicker value={endDate} onChange={setEndDate} label="To" />
+              </>
             ) : (
-              <View style={styles.dateRangeBox}>
-                <View style={styles.dateBox}>
-                  <Ionicons name="calendar-outline" size={16} color="#1A5F2B" />
-                  <Text style={styles.dateText}>{startDate.toLocaleDateString()}</Text>
-                </View>
-                <Ionicons name="arrow-forward" size={16} color="#94A3B8" />
-                <View style={styles.dateBox}>
-                  <Ionicons name="calendar-outline" size={16} color="#1A5F2B" />
-                  <Text style={styles.dateText}>{endDate.toLocaleDateString()}</Text>
-                </View>
+              <View style={styles.mobileDateBox}>
+                <Text style={styles.mobileDateText}>
+                  {startDate.toLocaleDateString()} - {endDate.toLocaleDateString()}
+                </Text>
               </View>
             )}
-          </LinearGradient>
+          </View>
+        </View>
 
-          {/* Export Buttons */}
-          <View style={styles.exportRow}>
-            <TouchableOpacity style={styles.exportBtnPrimary} onPress={() => exportCSV()}>
-              <Ionicons name="download-outline" size={18} color="#FFF" />
-              <Text style={styles.exportBtnText}>Export Report</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.exportBtnSecondary} onPress={exportTodayCSV}>
-              <Ionicons name="today-outline" size={18} color="#1A5F2B" />
-              <Text style={styles.exportBtnSecondaryText}>Daily</Text>
-            </TouchableOpacity>
+        <View style={styles.exportContainer}>
+          <TouchableOpacity style={styles.exportBtn} onPress={() => exportCSV()}>
+            <Ionicons name="download-outline" size={18} color="#fff" />
+            <Text style={styles.exportBtnText}>Export Selected</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.todayExportBtn} onPress={exportTodayCSV}>
+            <Ionicons name="calendar-outline" size={18} color="#4a55a2" />
+            <Text style={styles.todayExportText}>Daily Export</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.filterContainer}>
+          <FilterButton title="All" value="all" />
+          <FilterButton title="Dine-In" value="dinein" />
+          <FilterButton title="Takeaway" value="takeaway" />
+        </View>
+
+        <View style={styles.cashierFilterContainer}>
+          <Text style={styles.sectionTitle}>Cashier Filter</Text>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <CashierFilterButton title="All Cashiers" value="all" />
+
+            {cashierSummary.map(cashier => {
+              const key = `${cashier.cashierId ?? ''}-${cashier.cashierName}`;
+
+              return (
+                <CashierFilterButton
+                  key={key}
+                  title={cashier.cashierName}
+                  value={key}
+                />
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        <View style={styles.summaryContainer}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Total Orders</Text>
+            <Text style={styles.summaryValue}>{totals.orders}</Text>
           </View>
 
-          {/* Order Type Filters */}
-          <View style={styles.filterRow}>
-            <FilterButton title="All Orders" value="all" />
-            <FilterButton title="Dine-In" value="dinein" />
-            <FilterButton title="Takeaway" value="takeaway" />
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Gross Sale</Text>
+            <Text style={styles.summaryValue}>Rs {totals.subtotal.toFixed(2)}</Text>
           </View>
 
-          {/* Stats Cards */}
-          <View style={styles.statsGrid}>
-            <LinearGradient colors={['#1A5F2B', '#0D3D1C']} style={styles.statCardPrimary}>
-              <Ionicons name="receipt-outline" size={22} color="#FFF" opacity={0.8} />
-              <Text style={styles.statLabelWhite}>Total Orders</Text>
-              <Text style={styles.statValueWhite}>{totals.orders}</Text>
-            </LinearGradient>
-            <View style={styles.statCard}>
-              <Ionicons name="cash-outline" size={22} color="#1A5F2B" />
-              <Text style={styles.statLabel}>Gross Sale</Text>
-              <Text style={styles.statValue}>₨{totals.subtotal.toFixed(2)}</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Ionicons name="document-text-outline" size={22} color="#F5A623" />
-              <Text style={styles.statLabel}>Tax</Text>
-              <Text style={styles.statValue}>₨{totals.tax.toFixed(2)}</Text>
-            </View>
-            <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.statCardGold}>
-              <Ionicons name="wallet-outline" size={22} color="#FFF" />
-              <Text style={styles.statLabelWhite}>Net Total</Text>
-              <Text style={styles.statValueWhite}>₨{totals.total.toFixed(2)}</Text>
-            </LinearGradient>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Tax / Service</Text>
+            <Text style={styles.summaryValue}>Rs {totals.tax.toFixed(2)}</Text>
           </View>
 
-          {/* Split Cards */}
-          <View style={styles.splitRow}>
-            <View style={styles.splitCard}>
-              <View style={[styles.splitIcon, { backgroundColor: '#E8F5E9' }]}>
-                <Ionicons name="restaurant" size={22} color="#1A5F2B" />
-              </View>
-              <Text style={styles.splitTitle}>Dine-In</Text>
-              <Text style={styles.splitAmount}>₨{dineInTotals.total.toFixed(2)}</Text>
-              <Text style={styles.splitOrders}>{dineInTotals.orders} bills</Text>
-            </View>
-            <View style={styles.splitCard}>
-              <View style={[styles.splitIcon, { backgroundColor: '#FFF3E0' }]}>
-                <Ionicons name="cart" size={22} color="#F5A623" />
-              </View>
-              <Text style={styles.splitTitle}>Takeaway</Text>
-              <Text style={styles.splitAmount}>₨{takeawayTotals.total.toFixed(2)}</Text>
-              <Text style={styles.splitOrders}>{takeawayTotals.orders} bills</Text>
-            </View>
+          <View style={[styles.summaryCard, styles.totalCard]}>
+            <Text style={styles.summaryLabel}>Net Total</Text>
+            <Text style={styles.totalValue}>Rs {totals.total.toFixed(2)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.splitContainer}>
+          <View style={styles.splitCard}>
+            <Text style={styles.splitTitle}>Dine-In Sale</Text>
+            <Text style={styles.splitAmount}>Rs {dineInTotals.total.toFixed(2)}</Text>
+            <Text style={styles.splitOrders}>{dineInTotals.orders} bills</Text>
           </View>
 
-          {/* Cashier Filter */}
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>👥 Cashier Filter</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cashierFiltersContainer}>
-              <CashierFilterButton title="All Cashiers" value="all" />
-              {cashierSummary.map(cashier => {
-                const key = `${cashier.cashierId ?? ''}-${cashier.cashierName}`;
-                return (
-                  <CashierFilterButton key={key} title={cashier.cashierName} value={key} />
-                );
-              })}
-            </ScrollView>
+          <View style={styles.splitCard}>
+            <Text style={styles.splitTitle}>Takeaway Sale</Text>
+            <Text style={styles.splitAmount}>Rs {takeawayTotals.total.toFixed(2)}</Text>
+            <Text style={styles.splitOrders}>{takeawayTotals.orders} bills</Text>
           </View>
+        </View>
 
-          {/* Cashier Performance */}
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>📊 Cashier Performance</Text>
-            {cashierSummary.length === 0 ? (
-              <Text style={styles.emptyText}>No cashier data</Text>
-            ) : (
-              cashierSummary.map((cashier, idx) => (
-                <View key={idx} style={styles.cashierCard}>
-                  <View style={styles.cashierHeader}>
+        <View style={styles.cashierContainer}>
+          <Text style={styles.sectionTitle}>Cashier-wise Sales</Text>
+
+          {cashierSummary.length === 0 ? (
+            <Text style={styles.emptyText}>No cashier sale found</Text>
+          ) : (
+            cashierSummary.map(cashier => {
+              const cashierKey = `${cashier.cashierId ?? ''}-${cashier.cashierName}`;
+
+              return (
+                <View key={cashierKey} style={styles.cashierCard}>
+                  <View style={styles.cashierCardTop}>
                     <View style={styles.cashierAvatar}>
-                      <Text style={styles.cashierAvatarText}>{cashier.cashierName.charAt(0)}</Text>
+                      <Text style={styles.cashierAvatarText}>
+                        {cashier.cashierName.charAt(0).toUpperCase()}
+                      </Text>
                     </View>
-                    <View style={styles.cashierInfo}>
+
+                    <View style={{ flex: 1 }}>
                       <Text style={styles.cashierName}>{cashier.cashierName}</Text>
-                      <Text style={styles.cashierOrders}>{cashier.orders} orders</Text>
+                      <Text style={styles.cashierOrders}>{cashier.orders} total orders</Text>
                     </View>
-                    <Text style={styles.cashierTotal}>₨{cashier.totalSale.toFixed(0)}</Text>
+
                     <TouchableOpacity
                       style={styles.cashierExportBtn}
-                      onPress={() => exportCashierCSV(`${cashier.cashierId ?? ''}-${cashier.cashierName}`, cashier.cashierName)}
+                      onPress={() => exportCashierCSV(cashierKey, cashier.cashierName)}
                     >
-                      <Ionicons name="download-outline" size={16} color="#1A5F2B" />
+                      <Ionicons name="download-outline" size={16} color="#4a55a2" />
                     </TouchableOpacity>
                   </View>
-                  <View style={styles.cashierStats}>
-                    <View style={styles.cashierStat}>
+
+                  <View style={styles.cashierStatsRow}>
+                    <View style={styles.cashierStatBox}>
+                      <Text style={styles.cashierStatLabel}>Total Sale</Text>
+                      <Text style={styles.cashierStatValue}>Rs {cashier.totalSale.toFixed(0)}</Text>
+                    </View>
+
+                    <View style={styles.cashierStatBox}>
                       <Text style={styles.cashierStatLabel}>Dine-In</Text>
-                      <Text style={styles.cashierStatValue}>₨{cashier.dineinSale.toFixed(0)}</Text>
+                      <Text style={styles.cashierStatValue}>Rs {cashier.dineinSale.toFixed(0)}</Text>
                       <Text style={styles.cashierStatSub}>{cashier.dineinOrders} bills</Text>
                     </View>
-                    <View style={styles.cashierStat}>
+
+                    <View style={styles.cashierStatBox}>
                       <Text style={styles.cashierStatLabel}>Takeaway</Text>
-                      <Text style={styles.cashierStatValue}>₨{cashier.takeawaySale.toFixed(0)}</Text>
+                      <Text style={styles.cashierStatValue}>Rs {cashier.takeawaySale.toFixed(0)}</Text>
                       <Text style={styles.cashierStatSub}>{cashier.takeawayOrders} bills</Text>
                     </View>
                   </View>
                 </View>
-              ))
-            )}
+              );
+            })
+          )}
+        </View>
+
+        <View style={styles.productsContainer}>
+          <Text style={styles.sectionTitle}>Product-wise Sales</Text>
+
+          <View style={styles.tableHeader}>
+            <Text style={styles.headerNo}>No.</Text>
+            <Text style={styles.headerItem}>Product</Text>
+            <Text style={styles.headerQty}>Qty</Text>
+            <Text style={styles.headerAmount}>Amount</Text>
           </View>
 
-          {/* Product Sales */}
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>🍔 Top Selling Products</Text>
-            <View style={styles.productHeader}>
-              <Text style={styles.productHeaderNo}>#</Text>
-              <Text style={styles.productHeaderName}>Product</Text>
-              <Text style={styles.productHeaderQty}>Qty</Text>
-              <Text style={styles.productHeaderAmount}>Amount</Text>
-            </View>
-            {productSummary.length === 0 ? (
-              <Text style={styles.emptyText}>No product data</Text>
-            ) : (
-              productSummary.slice(0, 10).map((item, idx) => (
-                <View key={idx} style={styles.productRow}>
-                  <Text style={styles.productNo}>{idx + 1}</Text>
-                  <Text style={styles.productName}>{item.name}</Text>
-                  <Text style={styles.productQty}>{item.quantity}</Text>
-                  <Text style={styles.productAmount}>₨{item.totalAmount.toFixed(0)}</Text>
-                </View>
-              ))
-            )}
-          </View>
+          {productSummary.length === 0 ? (
+            <Text style={styles.emptyText}>No product sale found</Text>
+          ) : (
+            productSummary.map((item, index) => (
+              <View key={item.name} style={styles.productRow}>
+                <Text style={styles.rowNo}>{index + 1}</Text>
+                <Text style={styles.rowItem}>{item.name}</Text>
+                <Text style={styles.rowQty}>{item.quantity}</Text>
+                <Text style={styles.rowAmount}>Rs {item.totalAmount.toFixed(0)}</Text>
+              </View>
+            ))
+          )}
+        </View>
 
-          {/* Bills Section */}
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>🧾 Recent Bills</Text>
-            {filteredData.length === 0 ? (
-              <Text style={styles.emptyText}>No bills found</Text>
-            ) : (
-              filteredData.map((item, idx) => (
-                <View key={idx}>{renderSaleCard({ item })}</View>
-              ))
-            )}
-          </View>
+        <View style={styles.ordersContainer}>
+          <Text style={styles.sectionTitle}>Bill-wise Details</Text>
 
-          <View style={{ height: 30 }} />
-        </ScrollView>
-      </View>
-    </>
+          <FlatList
+            data={filteredData}
+            renderItem={renderSaleCard}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
+            scrollEnabled={false}
+            ListEmptyComponent={
+              <Text style={styles.emptyText}>No bills found in selected range</Text>
+            }
+          />
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F1F5F9' },
-  header: { paddingTop: Platform.OS === 'ios' ? 55 : 40, paddingHorizontal: 20, paddingBottom: 24 },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 22, fontWeight: '800', color: '#FFF' },
-  refreshBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
-  headerSubtitle: { fontSize: 13, color: '#94A3B8', marginTop: 4, paddingLeft: 8 },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
   scroll: { flex: 1 },
-  dateCard: { margin: 16, padding: 16, borderRadius: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 3 },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', marginBottom: 12 },
-  quickButtons: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  quickBtn: { backgroundColor: '#E8F5E9', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 25 },
-  quickBtnText: { color: '#1A5F2B', fontWeight: '600', fontSize: 13 },
-  webDateRow: { flexDirection: 'row', gap: 12 },
-  webDatePicker: { flex: 1 },
-  dateLabel: { fontSize: 12, color: '#64748B', marginBottom: 4, fontWeight: '500' },
-  dateRangeBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F8FAFC', padding: 12, borderRadius: 14 },
-  dateBox: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FFF', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
-  dateText: { fontSize: 13, color: '#0F172A', fontWeight: '500' },
-  exportRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 16 },
-  exportBtnPrimary: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#1A5F2B', paddingVertical: 12, borderRadius: 14 },
-  exportBtnText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
-  exportBtnSecondary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#FFF', paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: '#1A5F2B' },
-  exportBtnSecondaryText: { color: '#1A5F2B', fontWeight: '700', fontSize: 14 },
-  filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 16 },
-  filterBtn: { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: '#FFF' },
-  filterBtnActive: { backgroundColor: '#1A5F2B' },
-  filterBtnText: { fontSize: 13, fontWeight: '600', color: '#64748B' },
-  filterBtnTextActive: { color: '#FFF' },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16, marginBottom: 16 },
-  statCardPrimary: { flex: 1, minWidth: '45%', padding: 14, borderRadius: 16, alignItems: 'center', gap: 6 },
-  statCardGold: { flex: 1, minWidth: '45%', padding: 14, borderRadius: 16, alignItems: 'center', gap: 6 },
-  statCard: { flex: 1, minWidth: '45%', backgroundColor: '#FFF', padding: 14, borderRadius: 16, alignItems: 'center', gap: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
-  statLabelWhite: { fontSize: 12, color: '#FFF', opacity: 0.9 },
-  statValueWhite: { fontSize: 24, fontWeight: '800', color: '#FFF' },
-  statLabel: { fontSize: 12, color: '#64748B' },
-  statValue: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
-  splitRow: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, marginBottom: 16 },
-  splitCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 16, padding: 16, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
-  splitIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-  splitTitle: { fontSize: 13, color: '#64748B', fontWeight: '500' },
-  splitAmount: { fontSize: 20, fontWeight: '800', color: '#0F172A', marginTop: 4 },
-  splitOrders: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
-  sectionCard: { backgroundColor: '#FFF', marginHorizontal: 16, marginBottom: 16, padding: 16, borderRadius: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
-  sectionTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A', marginBottom: 14 },
-  emptyText: { textAlign: 'center', color: '#94A3B8', paddingVertical: 20 },
-  cashierFiltersContainer: { paddingHorizontal: 4, gap: 8 },
-  cashierFilterBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 25, marginRight: 8, gap: 6 },
-  cashierFilterBtnActive: { backgroundColor: '#1A5F2B' },
-  cashierFilterText: { color: '#1A5F2B', fontSize: 12, fontWeight: '600' },
-  cashierFilterTextActive: { color: '#FFF' },
-  cashierCard: { backgroundColor: '#F8FAFC', borderRadius: 16, padding: 14, marginBottom: 12 },
-  cashierHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  cashierAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1A5F2B', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  cashierAvatarText: { color: '#FFF', fontSize: 18, fontWeight: '700' },
-  cashierInfo: { flex: 1 },
-  cashierName: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
-  cashierOrders: { fontSize: 11, color: '#64748B', marginTop: 2 },
-  cashierTotal: { fontSize: 18, fontWeight: '800', color: '#1A5F2B', marginRight: 12 },
-  cashierExportBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#E8F5E9', alignItems: 'center', justifyContent: 'center' },
-  cashierStats: { flexDirection: 'row', gap: 12 },
-  cashierStat: { flex: 1, backgroundColor: '#FFF', borderRadius: 12, padding: 10, alignItems: 'center' },
-  cashierStatLabel: { fontSize: 11, color: '#64748B' },
-  cashierStatValue: { fontSize: 15, fontWeight: '700', color: '#0F172A', marginTop: 4 },
-  cashierStatSub: { fontSize: 10, color: '#94A3B8', marginTop: 2 },
-  productHeader: { flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', marginBottom: 8 },
-  productHeaderNo: { width: 40, fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-  productHeaderName: { flex: 1, fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-  productHeaderQty: { width: 60, fontSize: 12, fontWeight: '600', color: '#94A3B8', textAlign: 'right' },
-  productHeaderAmount: { width: 80, fontSize: 12, fontWeight: '600', color: '#94A3B8', textAlign: 'right' },
-  productRow: { flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F8FAFC' },
-  productNo: { width: 40, fontSize: 14, color: '#64748B' },
-  productName: { flex: 1, fontSize: 14, fontWeight: '500', color: '#0F172A' },
-  productQty: { width: 60, fontSize: 14, fontWeight: '600', color: '#1A5F2B', textAlign: 'right' },
-  productAmount: { width: 80, fontSize: 14, fontWeight: '600', color: '#0F172A', textAlign: 'right' },
-  saleCard: { backgroundColor: '#FFF', borderRadius: 16, padding: 14, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 2 },
-  saleCardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  saleInfo: { flex: 1 },
-  saleId: { fontSize: 13, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
-  orderBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
-  orderNumberText: { fontSize: 11, color: '#F5A623', fontWeight: '500' },
-  backendBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
-  backendText: { fontSize: 11, color: '#22C55E', fontWeight: '500' },
-  warningBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
-  warningText: { fontSize: 11, color: '#EF4444', fontWeight: '500' },
-  saleDate: { fontSize: 11, color: '#94A3B8', marginBottom: 2 },
-  cashierChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cashierText: { fontSize: 11, color: '#1A5F2B', fontWeight: '600' },
-  saleActions: { alignItems: 'flex-end', gap: 8 },
-  typeChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  dineinChip: { backgroundColor: '#1A5F2B' },
-  takeawayChip: { backgroundColor: '#F5A623' },
-  typeChipText: { fontSize: 11, fontWeight: '600', color: '#FFF' },
-  deleteBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' },
-  tableRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  tableText: { fontSize: 12, color: '#F5A623', fontWeight: '500' },
-  itemsContainer: { marginBottom: 10 },
-  itemRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
-  itemName: { fontSize: 13, color: '#475569', flex: 1 },
-  itemQty: { width: 45, textAlign: 'right', fontSize: 13, color: '#1A5F2B', fontWeight: '600' },
-  itemAmount: { width: 70, textAlign: 'right', fontSize: 13, color: '#0F172A', fontWeight: '500' },
-  divider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 8 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
-  totalLabel: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
-  totalAmount: { fontSize: 18, fontWeight: '800', color: '#F5A623' },
+
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+
+  dateContainer: {
+    backgroundColor: '#fff',
+    padding: 15,
+    marginTop: 1,
+  },
+
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 12,
+  },
+
+  quickRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+
+  quickBtn: {
+    backgroundColor: '#e8e8ff',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+  },
+
+  quickBtnText: {
+    color: '#4a55a2',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+
+  dateRange: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+
+  webDatePicker: {
+    flex: 1,
+  },
+
+  dateLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 5,
+  },
+
+  mobileDateBox: {
+    flex: 1,
+    padding: 12,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+  },
+
+  mobileDateText: {
+    color: '#333',
+    textAlign: 'center',
+  },
+
+  exportContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 15,
+    marginTop: 12,
+    gap: 10,
+  },
+
+  exportBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#4a55a2',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+
+  exportBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+
+  todayExportBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#4a55a2',
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+
+  todayExportText: {
+    color: '#4a55a2',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+
+  filterContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    margin: 15,
+    borderRadius: 12,
+    padding: 5,
+    gap: 5,
+  },
+
+  filterBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 9,
+    alignItems: 'center',
+  },
+
+  filterBtnActive: {
+    backgroundColor: '#4a55a2',
+  },
+
+  filterBtnText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+  },
+
+  filterBtnTextActive: {
+    color: '#fff',
+  },
+
+  cashierFilterContainer: {
+    backgroundColor: '#fff',
+    marginHorizontal: 15,
+    marginBottom: 12,
+    padding: 15,
+    borderRadius: 12,
+    elevation: 2,
+  },
+
+  cashierFilterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e8e8ff',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    marginRight: 8,
+    gap: 5,
+    maxWidth: 160,
+  },
+
+  cashierFilterBtnActive: {
+    backgroundColor: '#4a55a2',
+  },
+
+  cashierFilterText: {
+    color: '#4a55a2',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  cashierFilterTextActive: {
+    color: '#fff',
+  },
+
+  summaryContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 15,
+    gap: 10,
+  },
+
+  summaryCard: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: '#fff',
+    padding: 15,
+    borderRadius: 12,
+    elevation: 2,
+  },
+
+  summaryLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 5,
+  },
+
+  summaryValue: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '700',
+  },
+
+  totalCard: {
+    backgroundColor: '#e8f0fe',
+  },
+
+  totalValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4a55a2',
+  },
+
+  splitContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 15,
+    marginTop: 12,
+    gap: 10,
+  },
+
+  splitCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 15,
+    elevation: 2,
+  },
+
+  splitTitle: {
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '600',
+  },
+
+  splitAmount: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginTop: 6,
+  },
+
+  splitOrders: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+  },
+
+  cashierContainer: {
+    backgroundColor: '#fff',
+    margin: 15,
+    padding: 15,
+    borderRadius: 12,
+    elevation: 2,
+  },
+
+  cashierCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+
+  cashierCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  cashierAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#4a55a2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+
+  cashierAvatarText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+
+  cashierName: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+
+  cashierOrders: {
+    fontSize: 12,
+    color: '#777',
+    marginTop: 2,
+  },
+
+  cashierExportBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#e8e8ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  cashierStatsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+
+  cashierStatBox: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 10,
+  },
+
+  cashierStatLabel: {
+    fontSize: 11,
+    color: '#777',
+    marginBottom: 4,
+  },
+
+  cashierStatValue: {
+    fontSize: 13,
+    color: '#2c3e50',
+    fontWeight: 'bold',
+  },
+
+  cashierStatSub: {
+    fontSize: 10,
+    color: '#aaa',
+    marginTop: 2,
+  },
+
+  productsContainer: {
+    backgroundColor: '#fff',
+    margin: 15,
+    padding: 15,
+    borderRadius: 12,
+    elevation: 2,
+  },
+
+  tableHeader: {
+    flexDirection: 'row',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+
+  headerNo: {
+    width: 40,
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#999',
+  },
+
+  headerItem: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#999',
+  },
+
+  headerQty: {
+    width: 50,
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#999',
+    textAlign: 'right',
+  },
+
+  headerAmount: {
+    width: 90,
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#999',
+    textAlign: 'right',
+  },
+
+  productRow: {
+    flexDirection: 'row',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+
+  rowNo: {
+    width: 40,
+    fontSize: 14,
+    color: '#666',
+  },
+
+  rowItem: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+
+  rowQty: {
+    width: 50,
+    fontSize: 14,
+    color: '#4a55a2',
+    textAlign: 'right',
+    fontWeight: 'bold',
+  },
+
+  rowAmount: {
+    width: 90,
+    fontSize: 14,
+    color: '#2c3e50',
+    textAlign: 'right',
+    fontWeight: '600',
+  },
+
+  ordersContainer: {
+    backgroundColor: '#fff',
+    marginHorizontal: 15,
+    marginBottom: 15,
+    padding: 15,
+    borderRadius: 12,
+    elevation: 2,
+  },
+
+  saleCard: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+
+  saleTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  saleActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  saleId: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+
+  orderNumberText: {
+    fontSize: 11,
+    color: '#333',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+
+  backendText: {
+    fontSize: 11,
+    color: '#16A34A',
+    marginTop: 2,
+    fontWeight: '700',
+  },
+
+  warningText: {
+    fontSize: 11,
+    color: '#EF4444',
+    marginTop: 2,
+    fontWeight: '700',
+  },
+
+  saleDate: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 2,
+  },
+
+  cashierText: {
+    fontSize: 11,
+    color: '#4a55a2',
+    marginTop: 2,
+    fontWeight: '700',
+  },
+
+  typeBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+
+  dineinBadge: {
+    backgroundColor: '#e8e8ff',
+  },
+
+  takeawayBadge: {
+    backgroundColor: '#fff3e0',
+  },
+
+  typeBadgeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#4a55a2',
+  },
+
+  deleteBtn: {
+    backgroundColor: '#e74c3c',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  tableText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 8,
+  },
+
+  saleItemsBox: {
+    marginTop: 10,
+  },
+
+  saleItemRow: {
+    flexDirection: 'row',
+    paddingVertical: 4,
+  },
+
+  saleItemName: {
+    flex: 1,
+    fontSize: 13,
+    color: '#333',
+  },
+
+  saleItemQty: {
+    width: 40,
+    textAlign: 'right',
+    fontSize: 13,
+    color: '#4a55a2',
+    fontWeight: 'bold',
+  },
+
+  saleItemAmount: {
+    width: 80,
+    textAlign: 'right',
+    fontSize: 13,
+    color: '#333',
+  },
+
+  saleTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#ddd',
+    marginTop: 8,
+    paddingTop: 8,
+  },
+
+  saleTotalLabel: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+
+  saleTotalValue: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#2ecc71',
+  },
+
+  emptyText: {
+    textAlign: 'center',
+    color: '#aaa',
+    paddingVertical: 20,
+  },
 });
