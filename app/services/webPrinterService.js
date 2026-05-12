@@ -782,3 +782,407 @@ export const autoSelectWebPrinter = async () => {
 
   return selectedPrinter;
 };
+
+const getPrinterName = async (preferredPrinterName = '') => {
+  const printers = await listWebPrinters();
+
+  if (!printers.length) {
+    throw new Error('No printer found on this computer.');
+  }
+
+  const settings = getWebPrinterSettings();
+
+  console.log('QZ Available printers:', printers);
+  console.log('QZ Preferred printer:', preferredPrinterName);
+  console.log('QZ Saved printer:', settings.printerName);
+
+  const selectedPrinter = pickBestPrinter(printers, preferredPrinterName);
+
+  if (!selectedPrinter) {
+    throw new Error('Printer select nahi ho saka.');
+  }
+
+  saveWebPrinterSettings({
+    ...settings,
+    enabled: true,
+    printerName: selectedPrinter,
+    paperWidth: settings.paperWidth || 80,
+    autoCut: settings.autoCut !== false,
+  });
+
+  console.log('QZ Selected printer:', selectedPrinter);
+
+  return selectedPrinter;
+};
+
+const createPrinterConfig = (printerName) => {
+  return qz.configs.create(printerName, {
+    encoding: 'UTF-8',
+    forceRaw: false,
+    colorType: 'grayscale',
+    interpolation: 'nearest-neighbor',
+    copies: 1,
+    density: 203,
+    margins: 0,
+  });
+};
+
+export const printKotThenInvoiceWeb = async ({
+  restaurantName,
+  restaurantAddress,
+  restaurantLogo,
+  billNo,
+  tokenNo,
+  cashierName,
+  groupedCart,
+  cart,
+  subtotal,
+  discountAmount,
+  discountType,
+  discountValue,
+  total,
+  printerName,
+}) => {
+  await connectQzTray();
+
+  const settings = getWebPrinterSettings();
+  const selectedPrinterName = await getPrinterName(printerName);
+  const config = createPrinterConfig(selectedPrinterName);
+
+  const paperWidth = settings.paperWidth || 80;
+  const autoCut = settings.autoCut !== false;
+
+  const groups = Object.entries(groupedCart || {});
+
+  if (!groups.length) {
+    throw new Error('No KOT items found for printing.');
+  }
+
+  for (const [categoryName, items] of groups) {
+    const kotData = await buildKotCommands({
+      restaurantName,
+      billNo,
+      tokenNo,
+      cashierName,
+      categoryName,
+      items,
+      paperWidth,
+      autoCut,
+    });
+
+    const printableKotData = await convertReceiptForPrinter(
+      kotData,
+      selectedPrinterName,
+      paperWidth
+    );
+
+    await qz.print(config, printableKotData);
+  }
+
+  const invoiceData = await buildInvoiceCommands({
+    restaurantName,
+    restaurantAddress,
+    restaurantLogo,
+    billNo,
+    tokenNo,
+    cashierName,
+    cart,
+    subtotal,
+    discountAmount,
+    discountType,
+    discountValue,
+    total,
+    paperWidth,
+    autoCut,
+  });
+
+  const printableInvoiceData = await convertReceiptForPrinter(
+    invoiceData,
+    selectedPrinterName,
+    paperWidth
+  );
+
+  await qz.print(config, printableInvoiceData);
+  return true;
+};
+
+// ========== DINE-IN DIRECT PRINTING ==========
+
+const buildDineInKotCommands = async ({
+  restaurantName,
+  billNo,
+  tableNumber,
+  cashierName,
+  items,
+  paperWidth = 80,
+  autoCut = true,
+}) => {
+  const width = getReceiptWidth(paperWidth);
+  const now = new Date().toLocaleString('en-PK');
+  const data = [];
+
+  data.push(initPrinter());
+  data.push(alignCenter());
+  data.push(boldOn());
+  pushCenteredWrapped(data, restaurantName || 'BillPak', width);
+  data.push('DINE-IN KOT\n');
+  data.push(boldOff());
+
+  data.push(`${separator(width, '=')}\n`);
+  data.push(doubleSize());
+  data.push(`${center(`TABLE ${tableNumber || ''}`, Math.floor(width / 2))}\n`);
+  data.push(normalSize());
+  data.push(`${separator(width, '=')}\n`);
+
+  data.push(alignLeft());
+  data.push(line('KOT No', billNo, width) + '\n');
+  data.push(line('Time', now, width) + '\n');
+  data.push(line('Cashier', cashierName || 'Cashier', width) + '\n');
+  data.push(`${separator(width)}\n`);
+
+  for (const item of items || []) {
+    data.push(boldOn());
+    data.push(line(item?.name || 'Item', `x${Number(item?.quantity || 0)}`, width) + '\n');
+    data.push(boldOff());
+
+    if (item?.nameUrdu) {
+      await pushUrduImage(data, item.nameUrdu, paperWidth);
+    }
+  }
+
+  data.push(`${separator(width)}\n`);
+  data.push(alignCenter());
+  data.push('Kitchen Copy\n');
+
+  addBottomMargin(data);
+  if (autoCut) data.push(cutPaper());
+
+  return data;
+};
+
+const buildDineInInvoiceCommands = async ({
+  restaurantName,
+  restaurantAddress,
+  restaurantLogo,
+  billNo,
+  tableNumber,
+  cashierName,
+  items,
+  subtotal,
+  discountAmount,
+  discountType,
+  discountValue,
+  total,
+  paperWidth = 80,
+  autoCut = true,
+}) => {
+  const width = getReceiptWidth(paperWidth);
+  const now = new Date().toLocaleString('en-PK');
+  const data = [];
+
+  data.push(initPrinter());
+  data.push(alignCenter());
+
+  pushLogoIfBase64(data, restaurantLogo);
+
+  data.push(boldOn());
+  data.push(doubleSize());
+  data.push(`${safeText(restaurantName || 'BillPak')}\n`);
+  data.push(normalSize());
+  data.push(boldOff());
+
+  if (restaurantAddress) {
+    pushCenteredWrapped(data, restaurantAddress, width);
+  }
+
+  data.push(`${starSeparator(width)}\n`);
+  data.push(boldOn());
+  data.push(`${center('DINE-IN INVOICE', width)}\n`);
+  data.push(boldOff());
+  data.push(`${starSeparator(width)}\n`);
+
+  data.push(boldOn());
+  data.push(doubleSize());
+  data.push(`${center(`TABLE ${tableNumber || ''}`, Math.floor(width / 2))}\n`);
+  data.push(normalSize());
+  data.push(boldOff());
+  data.push(`${separator(width, '~')}\n`);
+
+  data.push(alignLeft());
+  data.push(line('Bill No:', billNo, width) + '\n');
+  data.push(line('Date:', now, width) + '\n');
+  data.push(line('Cashier:', cashierName || 'Cashier', width) + '\n');
+  data.push(line('Payment:', 'Cash', width) + '\n');
+  data.push(`${separator(width)}\n`);
+
+  data.push(boldOn());
+  data.push(line('ITEM', 'TOTAL', width) + '\n');
+  data.push(boldOff());
+  data.push(`${separator(width)}\n`);
+
+  for (const item of items || []) {
+    const qty = Number(item?.quantity || 0);
+    const price = Number(item?.price || 0);
+    const itemTotal = qty * price;
+    const itemName = `${item?.name || 'Item'}${item?.isCustom ? ' *' : ''}`;
+
+    pushLeftWrapped(data, itemName, width);
+
+    if (item?.nameUrdu) {
+      await pushUrduImage(data, item.nameUrdu, paperWidth);
+    }
+
+    data.push(line(`  ${qty} x Rs.${money(price)}`, `Rs.${money(itemTotal)}`, width) + '\n');
+  }
+
+  data.push(`${separator(width)}\n`);
+  data.push(line('Subtotal', `Rs.${money(subtotal)}`, width) + '\n');
+
+  if (Number(discountAmount || 0) > 0) {
+    const discountLabel =
+      discountType === 'percentage'
+        ? `Discount (${discountValue}%)`
+        : 'Discount';
+
+    data.push(line(discountLabel, `-Rs.${money(discountAmount)}`, width) + '\n');
+  }
+
+  data.push(`${doubleSeparator(width)}\n`);
+  data.push(boldOn());
+  data.push(doubleSize());
+  data.push(line('TOTAL', `Rs.${money(total)}`, width) + '\n');
+  data.push(normalSize());
+  data.push(boldOff());
+  data.push(`${doubleSeparator(width)}\n`);
+
+  data.push(alignCenter());
+  data.push(`\n${center('Thank you for dining with us!', width)}\n`);
+  data.push(separator(width) + '\n');
+  data.push(`${center('Powered by BillPak', width)}\n`);
+
+  addBottomMargin(data);
+  if (autoCut) data.push(cutPaper());
+
+  return data;
+};
+
+export const printDineInKotWeb = async ({
+  restaurantName,
+  billNo,
+  tableNumber,
+  cashierName,
+  items,
+  printerName,
+}) => {
+  await connectQzTray();
+
+  const settings = getWebPrinterSettings();
+  const selectedPrinterName = await getPrinterName(printerName);
+  const config = createPrinterConfig(selectedPrinterName);
+
+  const data = await buildDineInKotCommands({
+    restaurantName,
+    billNo,
+    tableNumber,
+    cashierName,
+    items,
+    paperWidth: settings.paperWidth || 80,
+    autoCut: settings.autoCut !== false,
+  });
+
+  const printableData = await convertReceiptForPrinter(
+    data,
+    selectedPrinterName,
+    settings.paperWidth || 80
+  );
+
+  await qz.print(config, printableData);
+  return true;
+};
+
+export const printDineInInvoiceWeb = async ({
+  restaurantName,
+  restaurantAddress,
+  restaurantLogo,
+  billNo,
+  tableNumber,
+  cashierName,
+  items,
+  subtotal,
+  discountAmount,
+  discountType,
+  discountValue,
+  total,
+  printerName,
+}) => {
+  await connectQzTray();
+
+  const settings = getWebPrinterSettings();
+  const selectedPrinterName = await getPrinterName(printerName);
+  const config = createPrinterConfig(selectedPrinterName);
+
+  const data = await buildDineInInvoiceCommands({
+    restaurantName,
+    restaurantAddress,
+    restaurantLogo,
+    billNo,
+    tableNumber,
+    cashierName,
+    items,
+    subtotal,
+    discountAmount,
+    discountType,
+    discountValue,
+    total,
+    paperWidth: settings.paperWidth || 80,
+    autoCut: settings.autoCut !== false,
+  });
+
+  const printableData = await convertReceiptForPrinter(
+    data,
+    selectedPrinterName,
+    settings.paperWidth || 80
+  );
+
+  await qz.print(config, printableData);
+  return true;
+};
+
+export const testWebPrinter = async ({ printerName } = {}) => {
+  await connectQzTray();
+
+  const settings = getWebPrinterSettings();
+  const selectedPrinterName = await getPrinterName(printerName);
+  const config = createPrinterConfig(selectedPrinterName);
+  const width = getReceiptWidth(settings.paperWidth || 80);
+
+  const data = [
+    initPrinter(),
+    alignCenter(),
+    boldOn(),
+    'BillPak Printer Test\n',
+    boldOff(),
+    separator(width) + '\n',
+    `Printer: ${selectedPrinterName}\n`,
+    `Time: ${new Date().toLocaleString('en-PK')}\n`,
+    separator(width) + '\n',
+  ];
+
+  await pushUrduImage(data, 'اردو ٹیسٹ', settings.paperWidth || 80);
+
+  data.push(
+    separator(width) + '\n',
+    'Powered by BillPak\n',
+    ...Array(10).fill('\n'),
+    settings.autoCut !== false ? cutPaper() : ''
+  );
+
+  const printableData = await convertReceiptForPrinter(
+    data,
+    selectedPrinterName,
+    settings.paperWidth || 80
+  );
+
+  await qz.print(config, printableData);
+  return true;
+};
