@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "BillPak",
+    "slug": "restaurantpos-mobile",
+    "version": "1.0.0",
+    "icon": "./assets/images/billpakiconsize.jpg",
+    "orientation": "portrait",
+    "scheme": "billpak",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.murtuzakhan12.billing"
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/billpak-logo.png"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c7a5a93c-122e-43ed-84f5-3713163e26aa"
+      }
+    },
+    "owner": "murtuzakhan12"
+  }
+}
