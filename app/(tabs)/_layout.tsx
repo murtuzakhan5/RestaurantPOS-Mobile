@@ -433,12 +433,12 @@ export default function TabsLayout() {
 
               {showAny(['branding', 'settings']) && (
                 <>
-                  <Text style={styles.sidebarSection}>SETTINGS</Text>
+                  <Text style={styles.sidebarSection}>POS Setting</Text>
 
                   {hasPermission('branding') && (
                     <MenuItem
-                      icon="color-palette-outline"
-                      label="Branding"
+                      icon="settings-outline"
+                      label="Setting"
                       onPress={() => router.push('/profile/branding')}
                     />
                   )}

@@ -88,10 +88,6 @@ export default function AnalyticsScreen() {
 
   useEffect(() => {
     loadAnalyticsData();
-  }, []);
-
-  useEffect(() => {
-    loadExpensesData();
   }, [startDate, endDate]);
 
   useEffect(() => {
@@ -104,16 +100,20 @@ export default function AnalyticsScreen() {
 
   const loadSalesData = async () => {
     try {
-      const saved = await AsyncStorage.getItem('sales_records');
-      const parsed = saved ? JSON.parse(saved) : [];
+      const response = await api.get('/restaurant/orders/sales-report', {
+        params: {
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+        },
+      });
 
-      const validSales = Array.isArray(parsed)
-        ? parsed.filter((sale: any) => !sale.isCancelled && sale.status !== 9)
-        : [];
-
-      setSalesData(validSales);
-    } catch (error) {
-      console.error('Analytics sales load error:', error);
+      const records = Array.isArray(response.data) ? response.data : [];
+      setSalesData(records);
+    } catch (error: any) {
+      console.error(
+        'Analytics sales API load error:',
+        error.response?.data || error.message
+      );
       setSalesData([]);
     }
   };

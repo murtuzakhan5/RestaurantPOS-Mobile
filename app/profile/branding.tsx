@@ -1,28 +1,28 @@
+// PROFESSIONAL POS SETTINGS SCREEN
+// FINAL VERSION WITH PROFESSIONAL ERROR HANDLING
+
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
-  Alert,
-  Platform,
   ScrollView,
-  ActivityIndicator,
   TextInput,
+  Image,
+  Platform,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useState, useEffect } from 'react';
+
+import { useEffect, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
+import api from '../services/api';
 
-// IMPORTANT:
-// Is path ko apne project ke hisaab se adjust karna.
-// Ye wahi file honi chahiye jisme listWebPrinters, selectWebPrinter,
-// getWebPrinterSettings aur testWebPrinter export ho rahe hain.
 import {
   listWebPrinters,
   selectWebPrinter,
@@ -31,278 +31,295 @@ import {
 } from '../services/webPrinterService';
 
 const LOGO_KEY = 'restaurant_logo';
-const LOGO_FILE_NAME = 'restaurant_logo.png';
 
-export default function BrandingScreen() {
-  const [logo, setLogo] = useState<string | null>(null);
+const showApiError = (
+  error: any,
+  fallback = 'Something went wrong'
+) => {
+  console.log('FULL ERROR =>', error);
+
+  let message =
+    error?.response?.data?.message ||
+    error?.response?.data?.error ||
+    error?.message ||
+    fallback;
+
+  if (
+    message?.includes('Network Error') ||
+    message?.includes('ERR_NETWORK')
+  ) {
+    message =
+      'Server se connection nahi ho saka. Internet ya backend check karo.';
+  }
+
+  if (error?.response?.status === 401) {
+    message = 'Session expired. Dobara login karein.';
+  }
+
+  if (error?.response?.status === 403) {
+    message = 'Aap ko is action ki permission nahi hai.';
+  }
+
+  if (error?.response?.status === 404) {
+    message = 'Requested API / resource nahi mili.';
+  }
+
+  if (error?.response?.status >= 500) {
+    message = 'Server error aya hai. Backend check karo.';
+  }
+
+  Alert.alert('Error', message);
+};
+
+export default function ProfessionalPOSSettingsScreen() {
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const [restaurantName, setRestaurantName] = useState('');
-  const [restaurantAddress, setRestaurantAddress] = useState('');
-  const [restaurantPhone, setRestaurantPhone] = useState('');
-  const [ownerName, setOwnerName] = useState('');
+  const [logo, setLogo] = useState<string | null>(null);
 
-  const [printerLoading, setPrinterLoading] = useState(false);
+  const [profile, setProfile] = useState({
+    name: '',
+    address: '',
+    phone: '',
+    email: '',
+    ownerName: '',
+    planName: '',
+    expiryDate: '',
+    isActive: true,
+  });
+
   const [printers, setPrinters] = useState<string[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState('');
   const [paperWidth, setPaperWidth] = useState<58 | 80>(80);
   const [autoCut, setAutoCut] = useState(true);
 
   useEffect(() => {
-    loadAllData();
+    loadAll();
   }, []);
 
-  const loadAllData = async () => {
-    await loadLogo();
-    await loadRestaurantInfo();
-    await loadPrinterSettings();
+  const loadAll = async () => {
+    await Promise.all([
+      loadProfile(),
+      loadLogo(),
+      loadPrinterSettings(),
+    ]);
+  };
+
+  const loadProfile = async () => {
+    try {
+      const response = await api.get('/restaurant/profile');
+
+      const restaurant = response.data?.restaurant || {};
+
+      setProfile({
+        name: restaurant.name || '',
+        address: restaurant.address || '',
+        phone: restaurant.phone || '',
+        email: restaurant.email || '',
+        ownerName: restaurant.ownerName || '',
+        planName: restaurant.planName || '',
+        expiryDate: restaurant.expiryDate || '',
+        isActive: restaurant.isActive ?? true,
+      });
+    } catch (error: any) {
+      showApiError(error, 'Profile load failed');
+    }
+  };
+
+  const saveProfile = async () => {
+    if (!profile.name.trim()) {
+      Alert.alert('Error', 'Restaurant name required');
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      await api.put('/restaurant/profile', {
+        name: profile.name,
+        address: profile.address,
+      });
+
+      await AsyncStorage.setItem(
+        'restaurant_name',
+        profile.name
+      );
+
+      await AsyncStorage.setItem(
+        'restaurant_address',
+        profile.address
+      );
+
+      Alert.alert(
+        'Success',
+        'Invoice details updated successfully'
+      );
+    } catch (error: any) {
+      showApiError(error, 'Profile update failed');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const loadLogo = async () => {
     try {
       const savedLogo = await AsyncStorage.getItem(LOGO_KEY);
-      setLogo(savedLogo || null);
-    } catch (error) {
-      console.log('Load logo error:', error);
-      setLogo(null);
+      setLogo(savedLogo);
+    } catch (error: any) {
+      showApiError(error, 'Logo load failed');
     }
   };
 
-  const loadRestaurantInfo = async () => {
+  const pickLogo = async () => {
     try {
-      const [name, address, phone, owner] = await Promise.all([
-        AsyncStorage.getItem('restaurant_name'),
-        AsyncStorage.getItem('restaurant_address'),
-        AsyncStorage.getItem('restaurant_phone'),
-        AsyncStorage.getItem('restaurant_owner_name'),
-      ]);
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-      setRestaurantName(name || '');
-      setRestaurantAddress(address || '');
-      setRestaurantPhone(phone || '');
-      setOwnerName(owner || '');
-    } catch (error) {
-      console.log('Load restaurant info error:', error);
+      if (!permission.granted) {
+        Alert.alert(
+          'Permission Required',
+          'Gallery permission allow karo'
+        );
+        return;
+      }
+
+      const result =
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.9,
+          allowsEditing: true,
+          base64: Platform.OS === 'web',
+        });
+
+      if (result.canceled) return;
+
+      const asset = result.assets[0];
+
+      let finalUri = asset.uri;
+
+      if (Platform.OS === 'web' && asset.base64) {
+        finalUri = `data:image/png;base64,${asset.base64}`;
+      }
+
+      await AsyncStorage.setItem(LOGO_KEY, finalUri);
+
+      setLogo(finalUri);
+
+      Alert.alert(
+        'Success',
+        'Restaurant logo updated successfully'
+      );
+    } catch (error: any) {
+      showApiError(error, 'Logo upload failed');
+    }
+  };
+
+  const removeLogo = async () => {
+    try {
+      await AsyncStorage.removeItem(LOGO_KEY);
+
+      setLogo(null);
+
+      Alert.alert(
+        'Success',
+        'Logo removed successfully'
+      );
+    } catch (error: any) {
+      showApiError(error, 'Logo remove failed');
     }
   };
 
   const loadPrinterSettings = async () => {
-    if (Platform.OS !== 'web') return;
-
     try {
+      if (Platform.OS !== 'web') return;
+
       const settings = getWebPrinterSettings();
 
-      setSelectedPrinter(settings?.printerName || '');
-      setPaperWidth(Number(settings?.paperWidth) === 58 ? 58 : 80);
+      setSelectedPrinter(
+        settings?.printerName || ''
+      );
+
+      setPaperWidth(
+        Number(settings?.paperWidth) === 58
+          ? 58
+          : 80
+      );
+
       setAutoCut(settings?.autoCut !== false);
-    } catch (error) {
-      console.log('Load printer settings error:', error);
+    } catch (error: any) {
+      showApiError(
+        error,
+        'Printer settings load failed'
+      );
     }
   };
 
   const loadPrinters = async () => {
-    if (Platform.OS !== 'web') {
-      Alert.alert('Printer Settings', 'Direct QZ printing sirf web version par available hai.');
-      return;
-    }
-
-    setPrinterLoading(true);
-
     try {
-      const foundPrinters = await listWebPrinters();
-      setPrinters(foundPrinters);
+      setLoading(true);
 
-      const settings = getWebPrinterSettings();
-      const savedPrinter = settings?.printerName || '';
+      const found = await listWebPrinters();
 
-      if (savedPrinter && foundPrinters.includes(savedPrinter)) {
-        setSelectedPrinter(savedPrinter);
-      } else if (!selectedPrinter && foundPrinters.length) {
-        setSelectedPrinter(foundPrinters[0]);
-      }
+      setPrinters(found);
 
-      if (!foundPrinters.length) {
-        Alert.alert('No Printer Found', 'Koi printer detect nahi hua. Printer install karke QZ Tray restart karo.');
+      if (!found.length) {
+        Alert.alert(
+          'No Printer Found',
+          'Koi printer detect nahi hua.'
+        );
       }
     } catch (error: any) {
-      console.log('Load printers error:', error);
-      Alert.alert('Printer Error', error?.message || 'Printers load nahi ho sake.');
+      showApiError(error, 'Printers load failed');
     } finally {
-      setPrinterLoading(false);
+      setLoading(false);
     }
   };
 
-  const savePrinterSettings = async () => {
-    if (Platform.OS !== 'web') {
-      Alert.alert('Printer Settings', 'Direct QZ printing sirf web version par available hai.');
-      return;
-    }
-
-    if (!selectedPrinter) {
-      Alert.alert('Error', 'Please select printer first');
-      return;
-    }
-
-    setPrinterLoading(true);
-
+  const savePrinter = async () => {
     try {
-      const saved = await selectWebPrinter({
-        printerName: selectedPrinter,
-        paperWidth,
-        autoCut,
-      });
+      if (!selectedPrinter) {
+        Alert.alert(
+          'Error',
+          'Please select printer first'
+        );
+        return;
+      }
 
-      setSelectedPrinter(saved);
-      Alert.alert('Success', `Printer saved: ${saved}`);
-    } catch (error: any) {
-      console.log('Save printer error:', error);
-      Alert.alert('Printer Error', error?.message || 'Printer save nahi ho saka.');
-    } finally {
-      setPrinterLoading(false);
-    }
-  };
-
-  const runTestPrint = async () => {
-    if (Platform.OS !== 'web') {
-      Alert.alert('Printer Test', 'Direct QZ printing sirf web version par available hai.');
-      return;
-    }
-
-    if (!selectedPrinter) {
-      Alert.alert('Error', 'Please select printer first');
-      return;
-    }
-
-    setPrinterLoading(true);
-
-    try {
       await selectWebPrinter({
         printerName: selectedPrinter,
         paperWidth,
         autoCut,
       });
 
+      Alert.alert(
+        'Success',
+        'Printer settings saved successfully'
+      );
+    } catch (error: any) {
+      showApiError(error, 'Printer save failed');
+    }
+  };
+
+  const runTestPrint = async () => {
+    try {
+      if (!selectedPrinter) {
+        Alert.alert(
+          'Error',
+          'Please select printer first'
+        );
+        return;
+      }
+
       await testWebPrinter({
         printerName: selectedPrinter,
       });
 
-      Alert.alert('Success', 'Test print sent successfully');
+      Alert.alert(
+        'Success',
+        'Test print sent successfully'
+      );
     } catch (error: any) {
-      console.log('Test print error:', error);
-      Alert.alert('Printer Error', error?.message || 'Test print nahi ho saka.');
-    } finally {
-      setPrinterLoading(false);
-    }
-  };
-
-  const saveRestaurantInfo = async () => {
-    if (!restaurantName.trim()) {
-      Alert.alert('Error', 'Please enter restaurant name');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      await Promise.all([
-        AsyncStorage.setItem('restaurant_name', restaurantName.trim()),
-        AsyncStorage.setItem('restaurant_address', restaurantAddress.trim()),
-        AsyncStorage.setItem('restaurant_phone', restaurantPhone.trim()),
-        AsyncStorage.setItem('restaurant_owner_name', ownerName.trim()),
-      ]);
-
-      Alert.alert('Success', 'Restaurant information saved!');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to save information');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const ensureBrandingDirectory = async () => {
-    const brandingDir = `${FileSystem.documentDirectory}branding/`;
-    const dirInfo = await FileSystem.getInfoAsync(brandingDir);
-
-    if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(brandingDir, { intermediates: true });
-    }
-
-    return brandingDir;
-  };
-
-  const pickLogo = async () => {
-    try {
-      setLoading(true);
-
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-      if (!permission.granted) {
-        Alert.alert('Permission Required', 'Gallery permission allow karo');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.9,
-        allowsEditing: true,
-        aspect: [16, 9],
-        base64: Platform.OS === 'web',
-      });
-
-      if (result.canceled) return;
-
-      const asset = result.assets[0];
-      let finalLogoUri = asset.uri;
-
-      if (Platform.OS === 'web' && asset.base64) {
-        finalLogoUri = `data:image/png;base64,${asset.base64}`;
-      } else if (Platform.OS !== 'web') {
-        const brandingDir = await ensureBrandingDirectory();
-        const permanentLogoPath = `${brandingDir}${LOGO_FILE_NAME}`;
-        const oldFile = await FileSystem.getInfoAsync(permanentLogoPath);
-
-        if (oldFile.exists) {
-          await FileSystem.deleteAsync(permanentLogoPath, { idempotent: true });
-        }
-
-        await FileSystem.copyAsync({ from: asset.uri, to: permanentLogoPath });
-        finalLogoUri = permanentLogoPath;
-      }
-
-      await AsyncStorage.setItem(LOGO_KEY, finalLogoUri);
-      setLogo(finalLogoUri);
-
-      Alert.alert('Success', 'Logo updated successfully!');
-    } catch (error: any) {
-      console.log('Pick logo error:', error);
-      Alert.alert('Error', error?.message || 'Logo save nahi ho saka');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const removeLogo = async () => {
-    try {
-      setLoading(true);
-
-      const savedLogo = await AsyncStorage.getItem(LOGO_KEY);
-
-      if (savedLogo && Platform.OS !== 'web') {
-        const fileInfo = await FileSystem.getInfoAsync(savedLogo);
-
-        if (fileInfo.exists) {
-          await FileSystem.deleteAsync(savedLogo, { idempotent: true });
-        }
-      }
-
-      await AsyncStorage.removeItem(LOGO_KEY);
-      setLogo(null);
-
-      Alert.alert('Removed', 'Logo removed successfully');
-    } catch (error) {
-      Alert.alert('Error', 'Logo remove nahi ho saka');
-    } finally {
-      setLoading(false);
+      showApiError(error, 'Test print failed');
     }
   };
 
@@ -311,330 +328,349 @@ export default function BrandingScreen() {
       <StatusBar style="light" />
 
       <View style={styles.container}>
-        <LinearGradient colors={['#0F172A', '#1A5F2B', '#0D3D1C']} style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color="#FFF" />
+        <LinearGradient
+          colors={['#1A5F2B', '#0D3D1C']}
+          style={styles.header}
+        >
+          <TouchableOpacity
+            onPress={() => router.back()}
+          >
+            <Ionicons
+              name="arrow-back"
+              size={24}
+              color="#FFF"
+            />
           </TouchableOpacity>
 
-          <Text style={styles.headerTitle}>Branding</Text>
+          <View>
+            <Text style={styles.headerTitle}>
+              POS Settings
+            </Text>
 
-          <View style={{ width: 40 }} />
+            <Text style={styles.headerSub}>
+              Branding, Invoice & Printer Settings
+            </Text>
+          </View>
+
+          <View style={{ width: 24 }} />
         </LinearGradient>
 
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Restaurant Logo</Text>
-            <Text style={styles.sectionSubtitle}>Logo invoice par top center mein print hoga</Text>
+        <ScrollView style={styles.content}>
+          {/* LOGO */}
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>
+              Restaurant Logo
+            </Text>
 
             <View style={styles.logoBox}>
               {logo ? (
-                <Image source={{ uri: logo }} style={styles.logo} resizeMode="contain" />
+                <Image
+                  source={{ uri: logo }}
+                  style={styles.logo}
+                  resizeMode="contain"
+                />
               ) : (
-                <View style={styles.emptyLogo}>
-                  <Ionicons name="image-outline" size={55} color="#CBD5E1" />
-                  <Text style={styles.emptyText}>No logo uploaded</Text>
-                </View>
+                <Ionicons
+                  name="image-outline"
+                  size={60}
+                  color="#CBD5E1"
+                />
               )}
             </View>
 
-            <View style={styles.logoButtons}>
+            <View style={styles.row}>
               <TouchableOpacity
-                style={[styles.uploadBtn, loading && styles.disabledBtn]}
+                style={styles.primaryBtn}
                 onPress={pickLogo}
-                disabled={loading}
               >
-                <LinearGradient colors={['#1A5F2B', '#0D3D1C']} style={styles.btnGradient}>
-                  <Ionicons name="cloud-upload-outline" size={20} color="#FFF" />
-                  <Text style={styles.btnText}>{logo ? 'Change Logo' : 'Upload Logo'}</Text>
-                </LinearGradient>
+                <Text style={styles.btnText}>
+                  Upload Logo
+                </Text>
               </TouchableOpacity>
 
               {logo && (
                 <TouchableOpacity
-                  style={[styles.removeBtn, loading && styles.disabledBtn]}
+                  style={styles.dangerBtn}
                   onPress={removeLogo}
-                  disabled={loading}
                 >
-                  <LinearGradient colors={['#EF4444', '#DC2626']} style={styles.btnGradient}>
-                    <Ionicons name="trash-outline" size={20} color="#FFF" />
-                    <Text style={styles.btnText}>Remove</Text>
-                  </LinearGradient>
+                  <Text style={styles.btnText}>
+                    Remove
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
           </View>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Restaurant Information</Text>
-            <Text style={styles.sectionSubtitle}>Yeh details invoice par print hongi</Text>
+          {/* INVOICE DETAILS */}
 
-            <View style={styles.infoCard}>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Restaurant Name *</Text>
-                <TextInput
-                  style={styles.infoInput}
-                  placeholder="e.g., BillPak Restaurant"
-                  placeholderTextColor="#94A3B8"
-                  value={restaurantName}
-                  onChangeText={setRestaurantName}
-                />
-              </View>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>
+              Invoice Details
+            </Text>
 
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Address</Text>
-                <TextInput
-                  style={styles.infoInput}
-                  placeholder="Full restaurant address"
-                  placeholderTextColor="#94A3B8"
-                  value={restaurantAddress}
-                  onChangeText={setRestaurantAddress}
-                  multiline
-                />
-              </View>
+            <TextInput
+              style={styles.input}
+              placeholder="Restaurant Name"
+              value={profile.name}
+              onChangeText={(t) =>
+                setProfile({
+                  ...profile,
+                  name: t,
+                })
+              }
+            />
 
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Phone Number</Text>
-                <TextInput
-                  style={styles.infoInput}
-                  placeholder="e.g., 0300 1234567"
-                  placeholderTextColor="#94A3B8"
-                  value={restaurantPhone}
-                  onChangeText={setRestaurantPhone}
-                  keyboardType="phone-pad"
-                />
-              </View>
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Owner Name</Text>
-                <TextInput
-                  style={styles.infoInput}
-                  placeholder="Owner/Manager name"
-                  placeholderTextColor="#94A3B8"
-                  value={ownerName}
-                  onChangeText={setOwnerName}
-                />
-              </View>
-            </View>
+            <TextInput
+              style={[
+                styles.input,
+                { height: 90 },
+              ]}
+              multiline
+              placeholder="Restaurant Address"
+              value={profile.address}
+              onChangeText={(t) =>
+                setProfile({
+                  ...profile,
+                  address: t,
+                })
+              }
+            />
 
             <TouchableOpacity
-              style={[styles.saveBtn, loading && styles.disabledBtn]}
-              onPress={saveRestaurantInfo}
-              disabled={loading}
+              style={styles.primaryBtn}
+              onPress={saveProfile}
+              disabled={saving}
             >
-              <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.btnGradient}>
-                <Ionicons name="save-outline" size={20} color="#FFF" />
-                <Text style={styles.btnText}>Save Information</Text>
-              </LinearGradient>
+              {saving ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.btnText}>
+                  Save Invoice Details
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Printer Settings</Text>
-            <Text style={styles.sectionSubtitle}>
-              Client aik dafa printer select karega, phir single click par invoice/KOT print hoga
+          {/* ACCOUNT INFO */}
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>
+              Account Information
             </Text>
 
-            {Platform.OS !== 'web' ? (
-              <View style={styles.warningBox}>
-                <Ionicons name="warning-outline" size={22} color="#B45309" />
-                <Text style={styles.warningText}>
-                  Direct QZ printing sirf web version par available hai.
-                </Text>
-              </View>
-            ) : (
-              <>
-                <TouchableOpacity
-                  style={[styles.refreshPrinterBtn, printerLoading && styles.disabledBtn]}
-                  onPress={loadPrinters}
-                  disabled={printerLoading}
-                >
-                  <Ionicons name="refresh-outline" size={18} color="#1A5F2B" />
-                  <Text style={styles.refreshPrinterText}>
-                    {printerLoading ? 'Loading Printers...' : 'Load / Refresh Printers'}
-                  </Text>
-                </TouchableOpacity>
+            <Info
+              label="Owner"
+              value={profile.ownerName}
+            />
 
-                {printerLoading && (
-                  <View style={styles.printerLoader}>
-                    <ActivityIndicator size="small" color="#1A5F2B" />
-                    <Text style={styles.printerLoaderText}>QZ printers load ho rahe hain...</Text>
-                  </View>
-                )}
+            <Info
+              label="Phone"
+              value={profile.phone}
+            />
 
-                <View style={styles.printerCard}>
-                  <Text style={styles.infoLabel}>Selected Printer</Text>
+            <Info
+              label="Email"
+              value={profile.email}
+            />
 
-                  {selectedPrinter ? (
-                    <View style={styles.selectedPrinterBox}>
-                      <Ionicons name="print-outline" size={20} color="#1A5F2B" />
-                      <Text style={styles.selectedPrinterText}>{selectedPrinter}</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.selectedPrinterBox}>
-                      <Ionicons name="print-outline" size={20} color="#94A3B8" />
-                      <Text style={styles.noPrinterText}>No printer selected</Text>
-                    </View>
-                  )}
+            <Info
+              label="Package"
+              value={profile.planName}
+            />
 
-                  <Text style={styles.printerHint}>
-                    Agar printer list empty ho to pehle QZ Tray open karo, printer install karo, phir refresh dabao.
-                  </Text>
-
-                  {printers.length > 0 && (
-                    <View style={styles.printerList}>
-                      {printers.map((printer) => {
-                        const isSelected = printer === selectedPrinter;
-
-                        return (
-                          <TouchableOpacity
-                            key={printer}
-                            style={[
-                              styles.printerOption,
-                              isSelected && styles.printerOptionSelected,
-                            ]}
-                            onPress={() => setSelectedPrinter(printer)}
-                            disabled={printerLoading}
-                          >
-                            <Ionicons
-                              name={isSelected ? 'radio-button-on' : 'radio-button-off'}
-                              size={20}
-                              color={isSelected ? '#1A5F2B' : '#94A3B8'}
-                            />
-                            <Text
-                              style={[
-                                styles.printerOptionText,
-                                isSelected && styles.printerOptionTextSelected,
-                              ]}
-                            >
-                              {printer}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.paperCard}>
-                  <Text style={styles.infoLabel}>Paper Width</Text>
-
-                  <View style={styles.paperOptions}>
-                    <TouchableOpacity
-                      style={[styles.paperOption, paperWidth === 58 && styles.paperOptionSelected]}
-                      onPress={() => setPaperWidth(58)}
-                    >
-                      <Text
-                        style={[
-                          styles.paperOptionText,
-                          paperWidth === 58 && styles.paperOptionTextSelected,
-                        ]}
-                      >
-                        58mm
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.paperOption, paperWidth === 80 && styles.paperOptionSelected]}
-                      onPress={() => setPaperWidth(80)}
-                    >
-                      <Text
-                        style={[
-                          styles.paperOptionText,
-                          paperWidth === 80 && styles.paperOptionTextSelected,
-                        ]}
-                      >
-                        80mm
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.autoCutRow}
-                  onPress={() => setAutoCut((value) => !value)}
-                >
-                  <View>
-                    <Text style={styles.autoCutTitle}>Auto Cut</Text>
-                    <Text style={styles.autoCutSubtitle}>Printer support karta ho to receipt cut hogi</Text>
-                  </View>
-
-                  <View style={[styles.switchBox, autoCut && styles.switchBoxOn]}>
-                    <View style={[styles.switchDot, autoCut && styles.switchDotOn]} />
-                  </View>
-                </TouchableOpacity>
-
-                <View style={styles.printerButtons}>
-                  <TouchableOpacity
-                    style={[styles.savePrinterBtn, printerLoading && styles.disabledBtn]}
-                    onPress={savePrinterSettings}
-                    disabled={printerLoading}
-                  >
-                    <LinearGradient colors={['#1A5F2B', '#0D3D1C']} style={styles.btnGradient}>
-                      <Ionicons name="save-outline" size={20} color="#FFF" />
-                      <Text style={styles.btnText}>Save Printer</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.testPrinterBtn, printerLoading && styles.disabledBtn]}
-                    onPress={runTestPrint}
-                    disabled={printerLoading}
-                  >
-                    <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.btnGradient}>
-                      <Ionicons name="print-outline" size={20} color="#FFF" />
-                      <Text style={styles.btnText}>Test Print</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
+            <Info
+              label="Status"
+              value={
+                profile.isActive
+                  ? 'Active'
+                  : 'Inactive'
+              }
+            />
           </View>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Invoice Preview</Text>
+          {/* PRINTER */}
 
-            <View style={styles.previewCard}>
-              {logo && <Image source={{ uri: logo }} style={styles.previewLogo} resizeMode="contain" />}
-              <Text style={styles.previewName}>{restaurantName || 'BillPak'}</Text>
-              {restaurantAddress && <Text style={styles.previewAddress}>{restaurantAddress}</Text>}
-              {restaurantPhone && <Text style={styles.previewPhone}>📞 {restaurantPhone}</Text>}
-              {selectedPrinter && (
-                <Text style={styles.previewPrinter}>Printer: {selectedPrinter}</Text>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>
+              Printer Settings
+            </Text>
+
+            <TouchableOpacity
+              style={styles.secondaryBtn}
+              onPress={loadPrinters}
+            >
+              {loading ? (
+                <ActivityIndicator />
+              ) : (
+                <Text style={styles.secondaryText}>
+                  Load Printers
+                </Text>
               )}
+            </TouchableOpacity>
+
+            {printers.map((printer) => (
+              <TouchableOpacity
+                key={printer}
+                style={[
+                  styles.printerItem,
+                  selectedPrinter === printer &&
+                    styles.selectedPrinter,
+                ]}
+                onPress={() =>
+                  setSelectedPrinter(printer)
+                }
+              >
+                <Text>{printer}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={[
+                  styles.paperBtn,
+                  paperWidth === 58 &&
+                    styles.paperBtnActive,
+                ]}
+                onPress={() =>
+                  setPaperWidth(58)
+                }
+              >
+                <Text>58mm</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.paperBtn,
+                  paperWidth === 80 &&
+                    styles.paperBtnActive,
+                ]}
+                onPress={() =>
+                  setPaperWidth(80)
+                }
+              >
+                <Text>80mm</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={styles.secondaryBtn}
+              onPress={() =>
+                setAutoCut(!autoCut)
+              }
+            >
+              <Text style={styles.secondaryText}>
+                Auto Cut:{' '}
+                {autoCut ? 'ON' : 'OFF'}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={savePrinter}
+              >
+                <Text style={styles.btnText}>
+                  Save Printer
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={runTestPrint}
+              >
+                <Text style={styles.secondaryText}>
+                  Test Print
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
+
+          {/* PREVIEW */}
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>
+              Invoice Preview
+            </Text>
+
+            {logo && (
+              <Image
+                source={{ uri: logo }}
+                style={styles.previewLogo}
+                resizeMode="contain"
+              />
+            )}
+
+            <Text style={styles.previewName}>
+              {profile.name || 'Restaurant'}
+            </Text>
+
+            <Text style={styles.previewText}>
+              {profile.address}
+            </Text>
+
+            <Text style={styles.previewText}>
+              {profile.phone}
+            </Text>
+
+            <Text style={styles.previewText}>
+              Printer:{' '}
+              {selectedPrinter ||
+                'Not Selected'}
+            </Text>
+          </View>
+
+          <View style={{ height: 40 }} />
         </ScrollView>
       </View>
     </>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F1F5F9' },
+function Info({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>
+        {label}
+      </Text>
 
-  header: {
-    paddingTop: Platform.OS === 'ios' ? 55 : 40,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+      <Text style={styles.infoValue}>
+        {value || 'N/A'}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
   },
 
-  backBtn: {
-    padding: 8,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 25,
-    width: 40,
-    height: 40,
+  header: {
+    paddingTop: 55,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
   },
 
   headerTitle: {
+    color: '#FFF',
     fontSize: 22,
     fontWeight: '800',
-    color: '#FFF',
+  },
+
+  headerSub: {
+    color: '#D1FAE5',
+    fontSize: 12,
   },
 
   content: {
@@ -642,398 +678,143 @@ const styles = StyleSheet.create({
     padding: 16,
   },
 
-  section: {
+  card: {
     backgroundColor: '#FFF',
     borderRadius: 20,
     padding: 16,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
   },
 
-  sectionTitle: {
+  cardTitle: {
     fontSize: 18,
     fontWeight: '800',
+    marginBottom: 14,
     color: '#0F172A',
-    marginBottom: 4,
-  },
-
-  sectionSubtitle: {
-    fontSize: 12,
-    color: '#64748B',
-    marginBottom: 16,
   },
 
   logoBox: {
-    width: 140,
-    height: 140,
-    backgroundColor: '#F8FAFC',
+    height: 160,
     borderRadius: 16,
+    backgroundColor: '#F1F5F9',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
     marginBottom: 16,
-    alignSelf: 'center',
   },
 
   logo: {
     width: 120,
     height: 120,
-    resizeMode: 'contain',
   },
 
-  emptyLogo: {
+  row: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+
+  primaryBtn: {
+    flex: 1,
+    backgroundColor: '#1A5F2B',
+    paddingVertical: 14,
+    borderRadius: 14,
     alignItems: 'center',
   },
 
-  emptyText: {
-    fontSize: 13,
-    color: '#94A3B8',
-    marginTop: 8,
-  },
-
-  logoButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-
-  uploadBtn: {
+  secondaryBtn: {
     flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-
-  removeBtn: {
-    flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-
-  btnGradient: {
-    flexDirection: 'row',
+    backgroundColor: '#E2E8F0',
+    paddingVertical: 14,
+    borderRadius: 14,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    gap: 8,
+    marginTop: 10,
+  },
+
+  dangerBtn: {
+    flex: 1,
+    backgroundColor: '#DC2626',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
   },
 
   btnText: {
     color: '#FFF',
     fontWeight: '700',
-    fontSize: 14,
   },
 
-  disabledBtn: {
-    opacity: 0.6,
+  secondaryText: {
+    color: '#0F172A',
+    fontWeight: '700',
   },
 
-  infoCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 16,
+  input: {
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 14,
   },
 
   infoRow: {
-    marginBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
   },
 
   infoLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 4,
-  },
-
-  infoInput: {
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#0F172A',
-    backgroundColor: '#FFF',
-  },
-
-  saveBtn: {
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-
-  warningBox: {
-    backgroundColor: '#FFFBEB',
-    borderWidth: 1,
-    borderColor: '#FDE68A',
-    borderRadius: 14,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-
-  warningText: {
-    flex: 1,
-    color: '#92400E',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-
-  refreshPrinterBtn: {
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-    backgroundColor: '#F0FDF4',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-
-  refreshPrinterText: {
-    color: '#1A5F2B',
-    fontWeight: '800',
-    fontSize: 14,
-  },
-
-  printerLoader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-
-  printerLoaderText: {
     color: '#64748B',
-    fontSize: 12,
-    fontWeight: '600',
   },
 
-  printerCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginBottom: 12,
-  },
-
-  selectedPrinterBox: {
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-
-  selectedPrinterText: {
-    flex: 1,
-    color: '#0F172A',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-
-  noPrinterText: {
-    flex: 1,
-    color: '#94A3B8',
-    fontSize: 13,
+  infoValue: {
     fontWeight: '700',
-  },
-
-  printerHint: {
-    color: '#64748B',
-    fontSize: 11,
-    marginTop: 8,
-    lineHeight: 16,
-  },
-
-  printerList: {
-    marginTop: 12,
-    gap: 8,
-  },
-
-  printerOption: {
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    padding: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-
-  printerOptionSelected: {
-    borderColor: '#1A5F2B',
-    backgroundColor: '#F0FDF4',
-  },
-
-  printerOptionText: {
-    flex: 1,
-    color: '#334155',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-
-  printerOptionTextSelected: {
-    color: '#1A5F2B',
-    fontWeight: '800',
-  },
-
-  paperCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginBottom: 12,
-  },
-
-  paperOptions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-
-  paperOption: {
-    flex: 1,
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-
-  paperOptionSelected: {
-    backgroundColor: '#F0FDF4',
-    borderColor: '#1A5F2B',
-  },
-
-  paperOptionText: {
-    color: '#64748B',
-    fontWeight: '800',
-  },
-
-  paperOptionTextSelected: {
-    color: '#1A5F2B',
-  },
-
-  autoCutRow: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  autoCutTitle: {
     color: '#0F172A',
-    fontWeight: '800',
-    fontSize: 14,
   },
 
-  autoCutSubtitle: {
-    color: '#64748B',
-    fontSize: 11,
-    marginTop: 2,
-  },
-
-  switchBox: {
-    width: 48,
-    height: 28,
-    borderRadius: 20,
-    backgroundColor: '#CBD5E1',
-    padding: 3,
-    justifyContent: 'center',
-  },
-
-  switchBoxOn: {
-    backgroundColor: '#1A5F2B',
-  },
-
-  switchDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#FFF',
-  },
-
-  switchDotOn: {
-    alignSelf: 'flex-end',
-  },
-
-  printerButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-
-  savePrinterBtn: {
-    flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-
-  testPrinterBtn: {
-    flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-
-  previewCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
+  printerItem: {
     padding: 12,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#CBD5E1',
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+
+  selectedPrinter: {
+    borderColor: '#1A5F2B',
+    backgroundColor: '#DCFCE7',
+  },
+
+  paperBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 12,
     alignItems: 'center',
+  },
+
+  paperBtnActive: {
+    backgroundColor: '#BBF7D0',
   },
 
   previewLogo: {
-    width: 80,
-    height: 80,
-    marginBottom: 8,
+    width: 90,
+    height: 90,
+    alignSelf: 'center',
+    marginBottom: 12,
   },
 
   previewName: {
-    fontSize: 16,
+    textAlign: 'center',
+    fontSize: 18,
     fontWeight: '800',
     color: '#1A5F2B',
-    textAlign: 'center',
   },
 
-  previewAddress: {
-    fontSize: 10,
-    color: '#64748B',
+  previewText: {
     textAlign: 'center',
+    color: '#64748B',
     marginTop: 4,
-  },
-
-  previewPhone: {
-    fontSize: 10,
-    color: '#64748B',
-    textAlign: 'center',
-    marginTop: 2,
-  },
-
-  previewPrinter: {
-    fontSize: 10,
-    color: '#1A5F2B',
-    textAlign: 'center',
-    marginTop: 8,
-    fontWeight: '700',
   },
 });
