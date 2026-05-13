@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     ActivityIndicator,
     Alert,
@@ -18,7 +19,7 @@ import {
 } from 'react-native';
 import staffApi, { StaffUser } from '../services/staffApi';
 
-const MODULES = [
+const ALL_MODULES = [
   { key: 'dashboard', label: 'Dashboard', icon: 'grid-outline' },
   { key: 'takeaway', label: 'Takeaway', icon: 'bag-handle-outline' },
   { key: 'dinein', label: 'Dine In Billing', icon: 'restaurant-outline' },
@@ -81,7 +82,7 @@ const emptyForm = {
   email: '',
   password: '',
   role: 3,
-  permissions: ['takeaway', 'dinein', 'print_bill'],
+  permissions: [],
 };
 
 export default function StaffManagementScreen() {
@@ -95,7 +96,7 @@ export default function StaffManagementScreen() {
   const [editingStaff, setEditingStaff] = useState<StaffUser | null>(null);
 
   const [form, setForm] = useState(emptyForm);
-
+const [MODULES, setMODULES] = useState<typeof ALL_MODULES>([]);
   const activeStaff = useMemo(
     () => staff.filter(item => item.isActive),
     [staff]
@@ -108,9 +109,33 @@ export default function StaffManagementScreen() {
 
   const visibleStaff = showInactive ? staff : activeStaff;
 
-  useEffect(() => {
-    loadStaff();
-  }, []);
+  const loadAllowedModules = async () => {
+  try {
+    const permissionsStr =
+      await AsyncStorage.getItem('permissions');
+
+    const permissions = permissionsStr
+      ? JSON.parse(permissionsStr)
+      : [];
+
+    const filteredModules = ALL_MODULES.filter(
+      module =>
+        permissions.includes(module.key)
+    );
+
+    setMODULES(filteredModules);
+  } catch (error) {
+    console.log(
+      'Load allowed modules error:',
+      error
+    );
+  }
+};
+
+useEffect(() => {
+  loadStaff();
+  loadAllowedModules();
+}, []);
 
   const loadStaff = async () => {
     try {
@@ -158,68 +183,121 @@ export default function StaffManagementScreen() {
   };
 
   const openAddModal = () => {
-    setEditingStaff(null);
-    setForm(emptyForm);
-    setModalVisible(true);
-  };
+  setEditingStaff(null);
 
-  const openEditModal = (item: StaffUser) => {
-    setEditingStaff(item);
+  setForm(emptyForm);
 
-    setForm({
-      name: item.name || '',
-      phone: item.phone || '',
-      email: item.email || '',
-      password: '',
-      role: 3,
-      permissions:
-        item.permissions && item.permissions.length > 0
-          ? item.permissions
-          : ['takeaway', 'dinein', 'print_bill'],
-    });
+  setModalVisible(true);
+};
 
-    setModalVisible(true);
-  };
+const openEditModal = (item: StaffUser) => {
+  setEditingStaff(item);
 
-  const closeModal = () => {
-    setModalVisible(false);
-    setEditingStaff(null);
-    setForm(emptyForm);
-  };
+  setForm({
+    name: item.name || '',
+    phone: item.phone || '',
+    email: item.email || '',
+    password: '',
+    role: 3,
 
-  const togglePermission = (key: string) => {
-    setForm(prev => {
-      const exists = prev.permissions.includes(key);
+    permissions:
+      item.permissions &&
+      item.permissions.length > 0
+        ? filterUnauthorizedPermissions(
+            item.permissions
+          )
+        : [],
+  });
 
-      return {
-        ...prev,
-        permissions: exists
-          ? prev.permissions.filter(x => x !== key)
-          : [...prev.permissions, key],
-      };
-    });
-  };
+  setModalVisible(true);
+};
 
-  const applyPreset = (permissions: string[]) => {
-    setForm(prev => ({
+const closeModal = () => {
+  setModalVisible(false);
+
+  setEditingStaff(null);
+
+  setForm(emptyForm);
+};
+
+const togglePermission = (
+  key: string
+) => {
+  setForm(prev => {
+    const currentPermissions =
+      prev.permissions || [];
+
+    const exists =
+      currentPermissions.includes(key);
+
+    return {
       ...prev,
-      permissions,
-    }));
-  };
 
-  const selectAllModules = () => {
-    setForm(prev => ({
-      ...prev,
-      permissions: MODULES.map(x => x.key),
-    }));
-  };
+      permissions: exists
+        ? currentPermissions.filter(
+            x => x !== key
+          )
+        : [
+            ...currentPermissions,
+            key,
+          ],
+    };
+  });
+};
 
-  const clearAllModules = () => {
-    setForm(prev => ({
-      ...prev,
-      permissions: [],
-    }));
-  };
+const filterUnauthorizedPermissions = (
+  permissions: string[] = []
+) => {
+  return permissions.filter(permission =>
+    MODULES.some(
+      m => m.key === permission
+    )
+  );
+};
+
+const applyPreset = (
+  permissions: string[]
+) => {
+  const allowedPermissions =
+    permissions.filter(permission =>
+      MODULES.some(
+        m => m.key === permission
+      )
+    );
+
+  setForm(prev => ({
+    ...prev,
+
+    permissions: allowedPermissions,
+  }));
+};
+
+const selectAllModules = () => {
+  if (!MODULES.length) {
+    Alert.alert(
+      'Please Wait',
+      'Modules abhi load ho rahe hain.'
+    );
+
+    return;
+  }
+
+  setForm(prev => ({
+    ...prev,
+
+    permissions: MODULES.map(
+      x => x.key
+    ),
+  }));
+};
+
+const clearAllModules = () => {
+  setForm(prev => ({
+    ...prev,
+
+    permissions: [],
+  }));
+};
 
   const validateForm = () => {
     if (!form.name.trim()) {
@@ -257,75 +335,116 @@ export default function StaffManagementScreen() {
     return true;
   };
 
-  const saveStaff = async () => {
-    if (!validateForm()) return;
+const saveStaff = async () => {
+  if (!validateForm()) return;
 
-    try {
-      setSaving(true);
+  try {
+    setSaving(true);
 
-      const finalPhone = normalizePhone(form.phone);
+    const finalPhone = normalizePhone(form.phone);
 
-      if (editingStaff) {
-        const res = await staffApi.updateStaff(editingStaff.id, {
+    if (editingStaff) {
+      const res = await staffApi.updateStaff(
+        editingStaff.id,
+        {
           name: form.name.trim(),
+
           email: form.email.trim(),
-          password: form.password.trim() || undefined,
+
+          password:
+            form.password.trim() ||
+            undefined,
+
           role: 3,
-          permissions: form.permissions,
-        });
 
-        console.log('Update employee response:', res);
+          permissions:
+            filterUnauthorizedPermissions(
+              form.permissions
+            ),
+        }
+      );
 
-        setStaff(prev =>
-          prev.map(item =>
-            item.id === editingStaff.id
-              ? {
-                  ...item,
-                  name: form.name.trim(),
-                  email: form.email.trim(),
-                  role: 3,
-                  permissions: form.permissions,
-                }
-              : item
-          )
-        );
+      console.log(
+        'Update employee response:',
+        res
+      );
 
-        Alert.alert(
-          'Success',
-          'Employee updated successfully. Agar ye employee login hai to logout/login dobara kare.'
-        );
-      } else {
-        const res = await staffApi.createStaff({
+      setStaff(prev =>
+        prev.map(item =>
+          item.id === editingStaff.id
+            ? {
+                ...item,
+
+                name: form.name.trim(),
+
+                email: form.email.trim(),
+
+                role: 3,
+
+                permissions:
+                  filterUnauthorizedPermissions(
+                    form.permissions
+                  ),
+              }
+            : item
+        )
+      );
+
+      Alert.alert(
+        'Success',
+        'Employee updated successfully. Agar ye employee login hai to logout/login dobara kare.'
+      );
+    } else {
+      const res =
+        await staffApi.createStaff({
           name: form.name.trim(),
+
           phone: finalPhone,
+
           email: form.email.trim(),
-          password: form.password.trim(),
+
+          password:
+            form.password.trim(),
+
           role: 3,
-          permissions: form.permissions,
+
+          permissions:
+            filterUnauthorizedPermissions(
+              form.permissions
+            ),
         });
 
-        console.log('Create employee response:', res);
+      console.log(
+        'Create employee response:',
+        res
+      );
 
-        await loadStaff();
+      await loadStaff();
 
-        Alert.alert('Success', 'Employee created successfully.');
-      }
-
-      closeModal();
-    } catch (error: any) {
-      console.log('Save staff error:', error.response?.data || error.message);
-
-      const message =
-        error.response?.data?.message ||
-        error.response?.data?.error ||
-        'Employee save nahi ho saka.';
-
-      Alert.alert('Error', message);
-    } finally {
-      setSaving(false);
+      Alert.alert(
+        'Success',
+        'Employee created successfully.'
+      );
     }
-  };
 
+    closeModal();
+  } catch (error: any) {
+    console.log(
+      'Save staff error:',
+      error.response?.data ||
+        error.message
+    );
+
+    const message =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      'Employee save nahi ho saka.';
+
+    Alert.alert('Error', message);
+  } finally {
+    setSaving(false);
+  }
+};
   const confirmAction = (
     title: string,
     message: string,
@@ -458,7 +577,7 @@ export default function StaffManagementScreen() {
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle}>Employee Access</Text>
             <Text style={styles.headerSubtitle}>
-              Kisi bhi employee ko koi bhi module access do
+Sirf allowed modules employee ko assign karein
             </Text>
           </View>
 
