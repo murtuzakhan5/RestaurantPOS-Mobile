@@ -7,13 +7,13 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
-  Alert,
   RefreshControl,
   KeyboardTypeOptions,
   Dimensions,
   Platform,
 } from 'react-native';
 import { useEffect, useState } from 'react';
+import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,10 +29,52 @@ import inventoryApi, {
 } from '../services/inventoryApi';
 
 const { width } = Dimensions.get('window');
-const isTablet = width >= 768;
 
 type TabType = 'items' | 'lowStock' | 'transactions';
 type TransactionTypeFilter = 'all' | 'stockIn' | 'sold' | 'stockOut';
+type DialogType = 'success' | 'error' | 'warning' | 'info' | 'confirm';
+
+interface AppDialogState {
+  visible: boolean;
+  type: DialogType;
+  title: string;
+  message: string;
+  confirmText: string;
+  cancelText?: string;
+  onConfirm?: (() => void | Promise<void>) | null;
+}
+
+interface UnitFormErrors {
+  name?: string;
+  shortName?: string;
+}
+
+interface ItemFormErrors {
+  name?: string;
+  unitId?: string;
+  minimumStock?: string;
+  averageCost?: string;
+}
+
+interface StockFormErrors {
+  inventoryItemId?: string;
+  quantity?: string;
+}
+
+interface HistoryFormErrors {
+  fromDate?: string;
+  toDate?: string;
+}
+
+const emptyDialog: AppDialogState = {
+  visible: false,
+  type: 'info',
+  title: '',
+  message: '',
+  confirmText: 'OK',
+  cancelText: 'Cancel',
+  onConfirm: null,
+};
 
 export default function InventoryScreen() {
   const [restaurantId, setRestaurantId] = useState<number>(1);
@@ -68,6 +110,12 @@ export default function InventoryScreen() {
     note: '',
   });
 
+  const [unitErrors, setUnitErrors] = useState<UnitFormErrors>({});
+  const [itemErrors, setItemErrors] = useState<ItemFormErrors>({});
+  const [stockErrors, setStockErrors] = useState<StockFormErrors>({});
+  const [historyErrors, setHistoryErrors] = useState<HistoryFormErrors>({});
+  const [appDialog, setAppDialog] = useState<AppDialogState>(emptyDialog);
+
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [historyType, setHistoryType] = useState<TransactionTypeFilter>('all');
@@ -76,6 +124,99 @@ export default function InventoryScreen() {
   useEffect(() => {
     init();
   }, []);
+
+  const showDialog = ({
+    type = 'info',
+    title,
+    message,
+    confirmText = 'OK',
+    cancelText = 'Cancel',
+    onConfirm = null,
+  }: {
+    type?: DialogType;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: (() => void | Promise<void>) | null;
+  }) => {
+    setAppDialog({
+      visible: true,
+      type,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      onConfirm,
+    });
+  };
+
+  const closeDialog = () => {
+    setAppDialog(emptyDialog);
+  };
+
+  const handleDialogConfirm = async () => {
+    const action = appDialog.onConfirm;
+    closeDialog();
+
+    if (action) {
+      await action();
+    }
+  };
+
+  const getApiErrorMessage = (error: any, fallback: string) => {
+    if (!error?.response) {
+      if (error?.message?.toLowerCase?.().includes('network')) {
+        return 'Network issue aa raha hai. Internet connection ya server availability check karein.';
+      }
+
+      return error?.message || fallback;
+    }
+
+    const status = error.response?.status;
+    const serverMessage =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.response?.data?.title ||
+      '';
+
+    if (serverMessage) return serverMessage;
+
+    if (status === 400) {
+      return 'Invalid data sent. Please check required fields and try again.';
+    }
+
+    if (status === 401) {
+      return 'Session expired. Please login again.';
+    }
+
+    if (status === 403) {
+      return 'Access denied. Inventory permission check karein.';
+    }
+
+    if (status === 404) {
+      return 'Requested inventory record/API endpoint not found.';
+    }
+
+    if (status === 405) {
+      return 'This API action is not supported by backend. Backend endpoint/method check karein.';
+    }
+
+    if (status >= 500) {
+      return 'Server error aa raha hai. Backend/API logs check karein.';
+    }
+
+    return fallback;
+  };
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/dashboard');
+  };
 
   const init = async () => {
     const id = await getRestaurantId();
@@ -124,7 +265,12 @@ export default function InventoryScreen() {
       setTransactions(transactionsRes || []);
     } catch (error: any) {
       console.log('Inventory load error:', error.response?.data || error.message);
-      Alert.alert('Error', 'Inventory data load nahi ho saka.');
+
+      showDialog({
+        type: 'error',
+        title: 'Inventory Load Failed',
+        message: getApiErrorMessage(error, 'Inventory data load nahi ho saka.'),
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -134,6 +280,100 @@ export default function InventoryScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     await loadAll();
+  };
+
+  const resetUnitForm = () => {
+    setUnitForm({ name: '', shortName: '' });
+    setUnitErrors({});
+  };
+
+  const resetItemForm = () => {
+    setItemForm({
+      name: '',
+      unitId: 0,
+      minimumStock: '',
+      averageCost: '',
+    });
+    setItemErrors({});
+  };
+
+  const resetStockForm = () => {
+    setStockForm({
+      inventoryItemId: 0,
+      quantity: '',
+      note: '',
+    });
+    setStockErrors({});
+  };
+
+  const closeUnitModal = () => {
+    if (loading) return;
+    setUnitModal(false);
+    resetUnitForm();
+  };
+
+  const closeItemModal = () => {
+    if (loading) return;
+    setItemModal(false);
+    resetItemForm();
+  };
+
+  const closeStockModal = () => {
+    if (loading) return;
+    setStockModal(false);
+    resetStockForm();
+  };
+
+  const updateUnitField = (key: keyof typeof unitForm, value: string) => {
+    setUnitForm(prev => ({ ...prev, [key]: value }));
+
+    if (unitErrors[key]) {
+      setUnitErrors(prev => ({ ...prev, [key]: undefined }));
+    }
+  };
+
+  const updateItemField = (key: keyof typeof itemForm, value: string | number) => {
+    let finalValue = value;
+
+    if (key === 'minimumStock' || key === 'averageCost') {
+      finalValue = String(value).replace(/[^0-9.]/g, '');
+    }
+
+    setItemForm(prev => ({ ...prev, [key]: finalValue }));
+
+    if (itemErrors[key as keyof ItemFormErrors]) {
+      setItemErrors(prev => ({ ...prev, [key]: undefined }));
+    }
+  };
+
+  const updateStockField = (key: keyof typeof stockForm, value: string | number) => {
+    let finalValue = value;
+
+    if (key === 'quantity') {
+      finalValue = String(value).replace(/[^0-9.]/g, '');
+    }
+
+    setStockForm(prev => ({ ...prev, [key]: finalValue }));
+
+    if (stockErrors[key as keyof StockFormErrors]) {
+      setStockErrors(prev => ({ ...prev, [key]: undefined }));
+    }
+  };
+
+  const updateFromDate = (value: string) => {
+    setFromDate(value);
+
+    if (historyErrors.fromDate) {
+      setHistoryErrors(prev => ({ ...prev, fromDate: undefined }));
+    }
+  };
+
+  const updateToDate = (value: string) => {
+    setToDate(value);
+
+    if (historyErrors.toDate) {
+      setHistoryErrors(prev => ({ ...prev, toDate: undefined }));
+    }
   };
 
   const createDefaultUnits = async () => {
@@ -152,20 +392,58 @@ export default function InventoryScreen() {
         await inventoryApi.createUnit(unit);
       }
 
-      Alert.alert('Success', 'Default units add ho gaye.');
+      showDialog({
+        type: 'success',
+        title: 'Default Units Created',
+        message: 'Default units add ho gaye.',
+      });
+
       await loadAll();
     } catch (error: any) {
-      Alert.alert('Error', 'Default units add nahi ho sake.');
+      console.log('Default units error:', error.response?.data || error.message);
+
+      showDialog({
+        type: 'error',
+        title: 'Default Units Failed',
+        message: getApiErrorMessage(error, 'Default units add nahi ho sake.'),
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateUnit = async () => {
-    if (!unitForm.name.trim() || !unitForm.shortName.trim()) {
-      Alert.alert('Required', 'Unit name aur short name required hain.');
-      return;
+  const validateUnitForm = () => {
+    const errors: UnitFormErrors = {};
+
+    if (!unitForm.name.trim()) {
+      errors.name = 'Unit name is required.';
+    } else if (unitForm.name.trim().length < 2) {
+      errors.name = 'Unit name must be at least 2 characters.';
     }
+
+    if (!unitForm.shortName.trim()) {
+      errors.shortName = 'Short name is required.';
+    } else if (unitForm.shortName.trim().length > 10) {
+      errors.shortName = 'Short name must be 10 characters or less.';
+    }
+
+    setUnitErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      showDialog({
+        type: 'warning',
+        title: 'Required Fields',
+        message: 'Please correct the highlighted unit fields before saving.',
+      });
+
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleCreateUnit = async () => {
+    if (!validateUnitForm()) return;
 
     try {
       setLoading(true);
@@ -176,27 +454,76 @@ export default function InventoryScreen() {
       });
 
       setUnitModal(false);
-      setUnitForm({ name: '', shortName: '' });
+      resetUnitForm();
 
-      Alert.alert('Success', 'Unit add ho gaya.');
+      showDialog({
+        type: 'success',
+        title: 'Unit Added',
+        message: `${unitForm.name.trim()} unit add ho gaya.`,
+      });
+
       await loadAll();
     } catch (error: any) {
-      Alert.alert('Error', 'Unit add nahi ho saka.');
+      console.log('Create unit error:', error.response?.data || error.message);
+
+      showDialog({
+        type: 'error',
+        title: 'Unit Save Failed',
+        message: getApiErrorMessage(error, 'Unit add nahi ho saka.'),
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateItem = async () => {
+  const validateItemForm = () => {
+    const errors: ItemFormErrors = {};
+    const minStock = itemForm.minimumStock.trim();
+    const avgCost = itemForm.averageCost.trim();
+
     if (!itemForm.name.trim()) {
-      Alert.alert('Required', 'Item name required hai.');
-      return;
+      errors.name = 'Item name is required.';
+    } else if (itemForm.name.trim().length < 2) {
+      errors.name = 'Item name must be at least 2 characters.';
     }
 
     if (!itemForm.unitId) {
-      Alert.alert('Required', 'Unit select karo.');
-      return;
+      errors.unitId = 'Unit is required.';
     }
+
+    if (minStock) {
+      const parsed = Number(minStock);
+
+      if (Number.isNaN(parsed) || parsed < 0) {
+        errors.minimumStock = 'Minimum stock must be a valid number.';
+      }
+    }
+
+    if (avgCost) {
+      const parsed = Number(avgCost);
+
+      if (Number.isNaN(parsed) || parsed < 0) {
+        errors.averageCost = 'Average cost must be a valid number.';
+      }
+    }
+
+    setItemErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      showDialog({
+        type: 'warning',
+        title: 'Required Fields',
+        message: 'Please correct the highlighted inventory item fields before saving.',
+      });
+
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleCreateItem = async () => {
+    if (!validateItemForm()) return;
 
     try {
       setLoading(true);
@@ -210,33 +537,62 @@ export default function InventoryScreen() {
       });
 
       setItemModal(false);
+      resetItemForm();
 
-      setItemForm({
-        name: '',
-        unitId: 0,
-        minimumStock: '',
-        averageCost: '',
+      showDialog({
+        type: 'success',
+        title: 'Item Added',
+        message: 'Inventory item add ho gaya.',
       });
 
-      Alert.alert('Success', 'Inventory item add ho gaya.');
       await loadAll();
     } catch (error: any) {
-      Alert.alert('Error', 'Inventory item add nahi ho saka.');
+      console.log('Create item error:', error.response?.data || error.message);
+
+      showDialog({
+        type: 'error',
+        title: 'Item Save Failed',
+        message: getApiErrorMessage(error, 'Inventory item add nahi ho saka.'),
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleStockIn = async () => {
+  const validateStockForm = () => {
+    const errors: StockFormErrors = {};
+
     if (!stockForm.inventoryItemId) {
-      Alert.alert('Required', 'Inventory item select karo.');
-      return;
+      errors.inventoryItemId = 'Inventory item is required.';
     }
 
-    if (!stockForm.quantity || Number(stockForm.quantity) <= 0) {
-      Alert.alert('Required', 'Valid quantity enter karo.');
-      return;
+    if (!stockForm.quantity.trim()) {
+      errors.quantity = 'Quantity is required.';
+    } else {
+      const qty = Number(stockForm.quantity);
+
+      if (Number.isNaN(qty) || qty <= 0) {
+        errors.quantity = 'Please enter a valid quantity.';
+      }
     }
+
+    setStockErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      showDialog({
+        type: 'warning',
+        title: 'Required Fields',
+        message: 'Please correct the highlighted stock fields before saving.',
+      });
+
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleStockIn = async () => {
+    if (!validateStockForm()) return;
 
     try {
       setLoading(true);
@@ -249,41 +605,63 @@ export default function InventoryScreen() {
       });
 
       setStockModal(false);
+      resetStockForm();
 
-      setStockForm({
-        inventoryItemId: 0,
-        quantity: '',
-        note: '',
+      showDialog({
+        type: 'success',
+        title: 'Stock Added',
+        message: 'Stock add ho gaya.',
       });
 
-      Alert.alert('Success', 'Stock add ho gaya.');
       await loadAll();
     } catch (error: any) {
-      Alert.alert('Error', 'Stock add nahi ho saka.');
+      console.log('Stock in error:', error.response?.data || error.message);
+
+      showDialog({
+        type: 'error',
+        title: 'Stock Save Failed',
+        message: getApiErrorMessage(error, 'Stock add nahi ho saka.'),
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const performDeleteItem = async (item: InventoryItem) => {
+    try {
+      setLoading(true);
+
+      await inventoryApi.deleteItem(item.id);
+
+      showDialog({
+        type: 'success',
+        title: 'Item Deleted',
+        message: `${item.name} delete ho gaya.`,
+      });
+
+      await loadAll();
+    } catch (error: any) {
+      console.log('Delete item error:', error.response?.data || error.message);
+
+      showDialog({
+        type: 'error',
+        title: 'Delete Failed',
+        message: getApiErrorMessage(error, 'Item delete nahi ho saka.'),
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeleteItem = (item: InventoryItem) => {
-    Alert.alert('Delete Item', `${item.name} delete karna hai?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            setLoading(true);
-            await inventoryApi.deleteItem(item.id);
-            await loadAll();
-          } catch (error: any) {
-            Alert.alert('Error', 'Item delete nahi ho saka.');
-          } finally {
-            setLoading(false);
-          }
-        },
-      },
-    ]);
+    showDialog({
+      type: 'confirm',
+      title: 'Delete Item?',
+      message: `${item.name} delete karna hai? Is action se related stock records affect ho sakte hain.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      onConfirm: () => performDeleteItem(item),
+    });
   };
 
   const getUnitShortName = (item: InventoryItem) => {
@@ -340,13 +718,56 @@ export default function InventoryScreen() {
     return 'stockOut';
   };
 
+  const isValidDateText = (value: string) => {
+    if (!value.trim()) return true;
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return false;
+
+    const date = new Date(`${value.trim()}T00:00:00`);
+
+    return !Number.isNaN(date.getTime());
+  };
+
+  const validateHistoryFilters = () => {
+    const errors: HistoryFormErrors = {};
+
+    if (!isValidDateText(fromDate)) {
+      errors.fromDate = 'Use YYYY-MM-DD format.';
+    }
+
+    if (!isValidDateText(toDate)) {
+      errors.toDate = 'Use YYYY-MM-DD format.';
+    }
+
+    const start = parseStartDate(fromDate);
+    const end = parseEndDate(toDate);
+
+    if (start && end && start > end) {
+      errors.toDate = 'To date must be after from date.';
+    }
+
+    setHistoryErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      showDialog({
+        type: 'warning',
+        title: 'Invalid Date Filter',
+        message: 'Please correct date filters before exporting or printing.',
+      });
+
+      return false;
+    }
+
+    return true;
+  };
+
   const parseStartDate = (value: string) => {
-    if (!value.trim()) return null;
+    if (!value.trim() || !isValidDateText(value)) return null;
     return new Date(`${value.trim()}T00:00:00`);
   };
 
   const parseEndDate = (value: string) => {
-    if (!value.trim()) return null;
+    if (!value.trim() || !isValidDateText(value)) return null;
     return new Date(`${value.trim()}T23:59:59`);
   };
 
@@ -456,12 +877,19 @@ export default function InventoryScreen() {
     setToDate('');
     setHistoryType('all');
     setSelectedHistoryItemId(0);
+    setHistoryErrors({});
   };
 
   const exportHistoryToExcel = async () => {
     try {
+      if (!validateHistoryFilters()) return;
+
       if (filteredTransactions.length === 0) {
-        Alert.alert('No Data', 'Export ke liye koi history data nahi hai.');
+        showDialog({
+          type: 'warning',
+          title: 'No Data',
+          message: 'Export ke liye koi history data nahi hai.',
+        });
         return;
       }
 
@@ -523,7 +951,11 @@ export default function InventoryScreen() {
 
         URL.revokeObjectURL(url);
 
-        Alert.alert('Success', 'Excel file download ho gayi.');
+        showDialog({
+          type: 'success',
+          title: 'Excel Exported',
+          message: 'Excel file download ho gayi.',
+        });
         return;
       }
 
@@ -550,18 +982,33 @@ export default function InventoryScreen() {
           UTI: 'com.microsoft.excel.xlsx',
         });
       } else {
-        Alert.alert('Saved', `Excel file saved: ${fileUri}`);
+        showDialog({
+          type: 'success',
+          title: 'Excel Saved',
+          message: `Excel file saved: ${fileUri}`,
+        });
       }
     } catch (error: any) {
       console.log('Excel export error:', error);
-      Alert.alert('Error', error?.message || 'Excel export nahi ho saka.');
+
+      showDialog({
+        type: 'error',
+        title: 'Excel Export Failed',
+        message: error?.message || 'Excel export nahi ho saka.',
+      });
     }
   };
 
   const printInventoryReport = async () => {
     try {
+      if (!validateHistoryFilters()) return;
+
       if (filteredTransactions.length === 0) {
-        Alert.alert('No Data', 'Report ke liye koi history data nahi hai.');
+        showDialog({
+          type: 'warning',
+          title: 'No Data',
+          message: 'Report ke liye koi history data nahi hai.',
+        });
         return;
       }
 
@@ -801,7 +1248,11 @@ export default function InventoryScreen() {
         const printWindow = window.open('', '_blank');
 
         if (!printWindow) {
-          Alert.alert('Popup Blocked', 'Please allow popups to print report.');
+          showDialog({
+            type: 'warning',
+            title: 'Popup Blocked',
+            message: 'Please allow browser popups to print report.',
+          });
           return;
         }
 
@@ -815,8 +1266,67 @@ export default function InventoryScreen() {
       await Print.printAsync({ html });
     } catch (error: any) {
       console.log('Print report error:', error);
-      Alert.alert('Error', error?.message || 'Report print nahi ho saka.');
+
+      showDialog({
+        type: 'error',
+        title: 'Print Failed',
+        message: error?.message || 'Report print nahi ho saka.',
+      });
     }
+  };
+
+  const getDialogIcon = () => {
+    if (appDialog.type === 'success') return 'checkmark-circle';
+    if (appDialog.type === 'error') return 'alert-circle';
+    if (appDialog.type === 'warning') return 'warning';
+    if (appDialog.type === 'confirm') return 'help-circle';
+    return 'information-circle';
+  };
+
+  const getDialogColor = () => {
+    if (appDialog.type === 'success') return '#16A34A';
+    if (appDialog.type === 'error') return '#DC2626';
+    if (appDialog.type === 'warning') return '#F59E0B';
+    if (appDialog.type === 'confirm') return '#F59E0B';
+    return '#1A5F2B';
+  };
+
+  const renderAppDialog = () => {
+    const isConfirm = appDialog.type === 'confirm';
+    const color = getDialogColor();
+
+    return (
+      <Modal visible={appDialog.visible} transparent animationType="fade" onRequestClose={closeDialog}>
+        <View style={styles.dialogOverlay}>
+          <View style={styles.dialogBox}>
+            <View style={[styles.dialogIconWrap, { backgroundColor: `${color}1A` }]}>
+              <Ionicons name={getDialogIcon() as any} size={42} color={color} />
+            </View>
+
+            <Text style={styles.dialogTitle}>{appDialog.title}</Text>
+            <Text style={styles.dialogMessage}>{appDialog.message}</Text>
+
+            <View style={styles.dialogActions}>
+              {isConfirm && (
+                <TouchableOpacity style={styles.dialogCancelBtn} onPress={closeDialog}>
+                  <Text style={styles.dialogCancelText}>{appDialog.cancelText || 'Cancel'}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.dialogConfirmBtn,
+                  { backgroundColor: isConfirm ? '#DC2626' : color },
+                ]}
+                onPress={handleDialogConfirm}
+              >
+                <Text style={styles.dialogConfirmText}>{appDialog.confirmText || 'OK'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
   return (
@@ -831,6 +1341,10 @@ export default function InventoryScreen() {
           style={styles.header}
         >
           <View style={styles.headerTop}>
+            <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+              <Ionicons name="arrow-back" size={24} color="#FFF" />
+            </TouchableOpacity>
+
             <Text style={styles.headerTitle}>Inventory</Text>
 
             <View style={styles.headerBadge}>
@@ -876,7 +1390,10 @@ export default function InventoryScreen() {
         <View style={styles.actionBar}>
           <TouchableOpacity
             style={styles.actionBtnPrimary}
-            onPress={() => setItemModal(true)}
+            onPress={() => {
+              setItemErrors({});
+              setItemModal(true);
+            }}
           >
             <Ionicons name="add-circle" size={20} color="#FFF" />
             <Text style={styles.actionBtnText}>Add Item</Text>
@@ -884,7 +1401,10 @@ export default function InventoryScreen() {
 
           <TouchableOpacity
             style={styles.actionBtnSecondary}
-            onPress={() => setStockModal(true)}
+            onPress={() => {
+              setStockErrors({});
+              setStockModal(true);
+            }}
           >
             <Ionicons name="arrow-up-circle" size={20} color="#FFF" />
             <Text style={styles.actionBtnText}>Add Stock</Text>
@@ -892,7 +1412,10 @@ export default function InventoryScreen() {
 
           <TouchableOpacity
             style={styles.actionBtnOutline}
-            onPress={() => setUnitModal(true)}
+            onPress={() => {
+              setUnitErrors({});
+              setUnitModal(true);
+            }}
           >
             <Ionicons name="add" size={20} color="#1A5F2B" />
             <Text style={styles.actionBtnOutlineText}>Unit</Text>
@@ -1142,7 +1665,14 @@ export default function InventoryScreen() {
 
                       <TouchableOpacity
                         style={styles.restockButton}
-                        onPress={() => setStockModal(true)}
+                        onPress={() => {
+                          setStockErrors({});
+                          setStockModal(true);
+                          setStockForm(prev => ({
+                            ...prev,
+                            inventoryItemId: item.id,
+                          }));
+                        }}
                       >
                         <Text style={styles.restockButtonText}>
                           Restock Now
@@ -1171,24 +1701,32 @@ export default function InventoryScreen() {
                       <Text style={styles.filterLabel}>From Date</Text>
 
                       <TextInput
-                        style={styles.filterInput}
+                        style={[styles.filterInput, historyErrors.fromDate && styles.filterInputError]}
                         placeholder="2026-05-01"
                         value={fromDate}
-                        onChangeText={setFromDate}
+                        onChangeText={updateFromDate}
                         placeholderTextColor="#94A3B8"
                       />
+
+                      {!!historyErrors.fromDate && (
+                        <Text style={styles.smallErrorText}>{historyErrors.fromDate}</Text>
+                      )}
                     </View>
 
                     <View style={styles.dateInputBox}>
                       <Text style={styles.filterLabel}>To Date</Text>
 
                       <TextInput
-                        style={styles.filterInput}
+                        style={[styles.filterInput, historyErrors.toDate && styles.filterInputError]}
                         placeholder="2026-05-30"
                         value={toDate}
-                        onChangeText={setToDate}
+                        onChangeText={updateToDate}
                         placeholderTextColor="#94A3B8"
                       />
+
+                      {!!historyErrors.toDate && (
+                        <Text style={styles.smallErrorText}>{historyErrors.toDate}</Text>
+                      )}
                     </View>
                   </View>
 
@@ -1476,22 +2014,20 @@ export default function InventoryScreen() {
                 label="Unit Name"
                 placeholder="Piece"
                 value={unitForm.name}
-                onChangeText={text =>
-                  setUnitForm({ ...unitForm, name: text })
-                }
+                error={unitErrors.name}
+                onChangeText={text => updateUnitField('name', text)}
               />
 
               <Input
                 label="Short Name"
                 placeholder="PCS"
                 value={unitForm.shortName}
-                onChangeText={text =>
-                  setUnitForm({ ...unitForm, shortName: text })
-                }
+                error={unitErrors.shortName}
+                onChangeText={text => updateUnitField('shortName', text)}
               />
 
               <ModalActions
-                onCancel={() => setUnitModal(false)}
+                onCancel={closeUnitModal}
                 onSave={handleCreateUnit}
                 loading={loading}
               />
@@ -1508,9 +2044,8 @@ export default function InventoryScreen() {
                 label="Item Name"
                 placeholder="Burger Bun"
                 value={itemForm.name}
-                onChangeText={text =>
-                  setItemForm({ ...itemForm, name: text })
-                }
+                error={itemErrors.name}
+                onChangeText={text => updateItemField('name', text)}
               />
 
               <Text style={styles.modalLabel}>Unit</Text>
@@ -1518,7 +2053,10 @@ export default function InventoryScreen() {
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                style={styles.unitScroll}
+                style={[
+                  styles.unitScroll,
+                  itemErrors.unitId && styles.selectionErrorBox,
+                ]}
               >
                 {units.map(unit => (
                   <TouchableOpacity
@@ -1527,9 +2065,7 @@ export default function InventoryScreen() {
                       styles.unitChip,
                       itemForm.unitId === unit.id && styles.unitChipActive,
                     ]}
-                    onPress={() =>
-                      setItemForm({ ...itemForm, unitId: unit.id })
-                    }
+                    onPress={() => updateItemField('unitId', unit.id)}
                   >
                     <Text
                       style={[
@@ -1544,14 +2080,20 @@ export default function InventoryScreen() {
                 ))}
               </ScrollView>
 
+              {!!itemErrors.unitId && (
+                <View style={styles.errorRow}>
+                  <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+                  <Text style={styles.errorText}>{itemErrors.unitId}</Text>
+                </View>
+              )}
+
               <Input
                 label="Minimum Stock"
                 placeholder="20"
                 keyboardType="numeric"
                 value={itemForm.minimumStock}
-                onChangeText={text =>
-                  setItemForm({ ...itemForm, minimumStock: text })
-                }
+                error={itemErrors.minimumStock}
+                onChangeText={text => updateItemField('minimumStock', text)}
               />
 
               <Input
@@ -1559,13 +2101,12 @@ export default function InventoryScreen() {
                 placeholder="25"
                 keyboardType="numeric"
                 value={itemForm.averageCost}
-                onChangeText={text =>
-                  setItemForm({ ...itemForm, averageCost: text })
-                }
+                error={itemErrors.averageCost}
+                onChangeText={text => updateItemField('averageCost', text)}
               />
 
               <ModalActions
-                onCancel={() => setItemModal(false)}
+                onCancel={closeItemModal}
                 onSave={handleCreateItem}
                 loading={loading}
               />
@@ -1580,7 +2121,12 @@ export default function InventoryScreen() {
 
               <Text style={styles.modalLabel}>Select Item</Text>
 
-              <ScrollView style={styles.itemScroll}>
+              <ScrollView
+                style={[
+                  styles.itemScroll,
+                  stockErrors.inventoryItemId && styles.selectionErrorBox,
+                ]}
+              >
                 {items.map(item => (
                   <TouchableOpacity
                     key={item.id}
@@ -1589,12 +2135,7 @@ export default function InventoryScreen() {
                       stockForm.inventoryItemId === item.id &&
                         styles.itemSelectActive,
                     ]}
-                    onPress={() =>
-                      setStockForm({
-                        ...stockForm,
-                        inventoryItemId: item.id,
-                      })
-                    }
+                    onPress={() => updateStockField('inventoryItemId', item.id)}
                   >
                     <Text
                       style={[
@@ -1609,33 +2150,39 @@ export default function InventoryScreen() {
                 ))}
               </ScrollView>
 
+              {!!stockErrors.inventoryItemId && (
+                <View style={styles.errorRow}>
+                  <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+                  <Text style={styles.errorText}>{stockErrors.inventoryItemId}</Text>
+                </View>
+              )}
+
               <Input
                 label="Quantity"
                 placeholder="100"
                 keyboardType="numeric"
                 value={stockForm.quantity}
-                onChangeText={text =>
-                  setStockForm({ ...stockForm, quantity: text })
-                }
+                error={stockErrors.quantity}
+                onChangeText={text => updateStockField('quantity', text)}
               />
 
               <Input
                 label="Note (Optional)"
                 placeholder="Initial stock"
                 value={stockForm.note}
-                onChangeText={text =>
-                  setStockForm({ ...stockForm, note: text })
-                }
+                onChangeText={text => updateStockField('note', text)}
               />
 
               <ModalActions
-                onCancel={() => setStockModal(false)}
+                onCancel={closeStockModal}
                 onSave={handleStockIn}
                 loading={loading}
               />
             </View>
           </View>
         </Modal>
+
+        {renderAppDialog()}
       </View>
     </>
   );
@@ -1643,6 +2190,7 @@ export default function InventoryScreen() {
 
 function Input({
   label,
+  error,
   ...props
 }: {
   label: string;
@@ -1650,15 +2198,23 @@ function Input({
   value: string;
   onChangeText: (text: string) => void;
   keyboardType?: KeyboardTypeOptions;
+  error?: string;
 }) {
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.modalLabel}>{label}</Text>
       <TextInput
         {...props}
-        style={styles.modalInput}
+        style={[styles.modalInput, error && styles.modalInputError]}
         placeholderTextColor="#94A3B8"
       />
+
+      {!!error && (
+        <View style={styles.errorRow}>
+          <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -1695,12 +2251,12 @@ function ModalActions({
 }) {
   return (
     <View style={styles.modalActions}>
-      <TouchableOpacity style={styles.modalCancelBtn} onPress={onCancel}>
+      <TouchableOpacity style={styles.modalCancelBtn} onPress={onCancel} disabled={loading}>
         <Text style={styles.modalCancelText}>Cancel</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={styles.modalSaveBtn}
+        style={[styles.modalSaveBtn, loading && { opacity: 0.7 }]}
         onPress={onSave}
         disabled={loading}
       >
@@ -1731,6 +2287,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     marginBottom: 6,
+  },
+
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   headerTitle: {
@@ -2233,6 +2798,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
+  filterInputError: {
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
+  },
+
+  smallErrorText: {
+    color: '#DC2626',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+
   filterChipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2437,16 +3014,43 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 15,
     color: '#0F172A',
-    marginBottom: 16,
+    marginBottom: 6,
+  },
+
+  modalInputError: {
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
   },
 
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: 14,
+  },
+
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 3,
+  },
+
+  errorText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
 
   unitScroll: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+
+  selectionErrorBox: {
+    borderWidth: 1,
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
+    borderRadius: 14,
+    padding: 4,
   },
 
   unitChip: {
@@ -2472,7 +3076,7 @@ const styles = StyleSheet.create({
 
   itemScroll: {
     maxHeight: 180,
-    marginBottom: 16,
+    marginBottom: 8,
   },
 
   itemSelect: {
@@ -2528,5 +3132,87 @@ const styles = StyleSheet.create({
   modalSaveText: {
     color: '#FFF',
     fontWeight: '700',
+  },
+
+  dialogOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+
+  dialogBox: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 22,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 18,
+  },
+
+  dialogIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+
+  dialogTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+
+  dialogMessage: {
+    fontSize: 14,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+
+  dialogActions: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 10,
+    marginTop: 20,
+  },
+
+  dialogCancelBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+  },
+
+  dialogCancelText: {
+    color: '#64748B',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  dialogConfirmBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  dialogConfirmText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });

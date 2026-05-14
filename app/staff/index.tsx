@@ -6,7 +6,6 @@ import { useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     ActivityIndicator,
-    Alert,
     Modal,
     Platform,
     Pressable,
@@ -76,7 +75,52 @@ const QUICK_PRESETS = [
   },
 ];
 
-const emptyForm = {
+type NoticeType = 'success' | 'error' | 'warning' | 'info';
+
+type NoticeState = {
+  visible: boolean;
+  type: NoticeType;
+  title: string;
+  message: string;
+  details?: string;
+};
+
+type ConfirmState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  confirmText: string;
+  destructive?: boolean;
+  onConfirm?: () => void;
+};
+
+type EmployeeForm = {
+  name: string;
+  phone: string;
+  email: string;
+  password: string;
+  role: number;
+  permissions: string[];
+};
+
+type FieldErrors = Partial<Record<'name' | 'phone' | 'email' | 'password' | 'permissions', string>>;
+
+const emptyNotice: NoticeState = {
+  visible: false,
+  type: 'info',
+  title: '',
+  message: '',
+};
+
+const emptyConfirm: ConfirmState = {
+  visible: false,
+  title: '',
+  message: '',
+  confirmText: 'Confirm',
+  destructive: false,
+};
+
+const emptyForm: EmployeeForm = {
   name: '',
   phone: '',
   email: '',
@@ -95,8 +139,86 @@ export default function StaffManagementScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffUser | null>(null);
 
-  const [form, setForm] = useState(emptyForm);
-const [MODULES, setMODULES] = useState<typeof ALL_MODULES>([]);
+  const [form, setForm] = useState<EmployeeForm>(emptyForm);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [notice, setNotice] = useState<NoticeState>(emptyNotice);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmState>(emptyConfirm);
+  const [MODULES, setMODULES] = useState<typeof ALL_MODULES>([]);
+  const showNotice = (
+    type: NoticeType,
+    title: string,
+    message: string,
+    details?: string
+  ) => {
+    setNotice({
+      visible: true,
+      type,
+      title,
+      message,
+      details,
+    });
+  };
+
+  const closeNotice = () => {
+    setNotice(emptyNotice);
+  };
+
+  const getErrorDetails = (error: any) => {
+    const responseData = error?.response?.data;
+
+    if (!responseData) return '';
+
+    if (typeof responseData === 'string') return responseData;
+
+    try {
+      return JSON.stringify(responseData, null, 2);
+    } catch {
+      return '';
+    }
+  };
+
+  const showApiError = (
+    title: string,
+    fallbackMessage: string,
+    error: any
+  ) => {
+    const status = error?.response?.status;
+    const message =
+      error?.response?.data?.message ||
+      error?.response?.data?.error ||
+      error?.message ||
+      fallbackMessage;
+
+    const details = getErrorDetails(error);
+
+    showNotice(
+      'error',
+      status ? `${title} (${status})` : title,
+      message,
+      details && details !== message ? details : undefined
+    );
+  };
+
+  const updateFormField = <K extends keyof EmployeeForm>(
+    key: K,
+    value: EmployeeForm[K]
+  ) => {
+    setForm(prev => ({
+      ...prev,
+      [key]: value,
+    }));
+
+    setFieldErrors(prev => ({
+      ...prev,
+      [key]: undefined,
+    }));
+  };
+
+  const resetFormErrors = () => {
+    setFieldErrors({});
+  };
+
+
   const activeStaff = useMemo(
     () => staff.filter(item => item.isActive),
     [staff]
@@ -124,10 +246,16 @@ const [MODULES, setMODULES] = useState<typeof ALL_MODULES>([]);
     );
 
     setMODULES(filteredModules);
-  } catch (error) {
+  } catch (error: any) {
     console.log(
       'Load allowed modules error:',
       error
+    );
+
+    showNotice(
+      'warning',
+      'Permissions Load Issue',
+      'Allowed modules load nahi ho sake. Please refresh ya dobara login karein.'
     );
   }
 };
@@ -148,13 +276,14 @@ useEffect(() => {
       console.log('Load staff error:', error.response?.data || error.message);
 
       if (error.response?.status === 401) {
-        Alert.alert('Unauthorized', 'Please login again.');
-        router.replace('/(auth)/login');
+        showNotice('warning', 'Session Expired', 'Please login again.');
+        setTimeout(() => router.replace('/(auth)/login'), 800);
         return;
       }
 
       if (error.response?.status === 403) {
-        Alert.alert(
+        showNotice(
+          'error',
           'Access Denied',
           error.response?.data?.message ||
             'You do not have access to Employee Access.'
@@ -162,7 +291,7 @@ useEffect(() => {
         return;
       }
 
-      Alert.alert('Error', 'Employee data load nahi ho saka.');
+      showApiError('Load Failed', 'Employee data load nahi ho saka.', error);
     } finally {
       setLoading(false);
     }
@@ -187,6 +316,8 @@ useEffect(() => {
 
   setForm(emptyForm);
 
+  resetFormErrors();
+
   setModalVisible(true);
 };
 
@@ -209,6 +340,8 @@ const openEditModal = (item: StaffUser) => {
         : [],
   });
 
+  resetFormErrors();
+
   setModalVisible(true);
 };
 
@@ -218,11 +351,18 @@ const closeModal = () => {
   setEditingStaff(null);
 
   setForm(emptyForm);
+
+  resetFormErrors();
 };
 
 const togglePermission = (
   key: string
 ) => {
+  setFieldErrors(prev => ({
+    ...prev,
+    permissions: undefined,
+  }));
+
   setForm(prev => {
     const currentPermissions =
       prev.permissions || [];
@@ -265,6 +405,11 @@ const applyPreset = (
       )
     );
 
+  setFieldErrors(prev => ({
+    ...prev,
+    permissions: undefined,
+  }));
+
   setForm(prev => ({
     ...prev,
 
@@ -274,13 +419,19 @@ const applyPreset = (
 
 const selectAllModules = () => {
   if (!MODULES.length) {
-    Alert.alert(
+    showNotice(
+      'info',
       'Please Wait',
       'Modules abhi load ho rahe hain.'
     );
 
     return;
   }
+
+  setFieldErrors(prev => ({
+    ...prev,
+    permissions: undefined,
+  }));
 
   setForm(prev => ({
     ...prev,
@@ -292,6 +443,11 @@ const selectAllModules = () => {
 };
 
 const clearAllModules = () => {
+  setFieldErrors(prev => ({
+    ...prev,
+    permissions: undefined,
+  }));
+
   setForm(prev => ({
     ...prev,
 
@@ -300,35 +456,38 @@ const clearAllModules = () => {
 };
 
   const validateForm = () => {
+    const errors: FieldErrors = {};
+    const finalPhone = normalizePhone(form.phone);
+
     if (!form.name.trim()) {
-      Alert.alert('Required', 'Employee name required hai.');
-      return false;
+      errors.name = 'Employee name required hai.';
     }
 
     if (!form.phone.trim()) {
-      Alert.alert('Required', 'Phone number required hai.');
-      return false;
-    }
-
-    const finalPhone = normalizePhone(form.phone);
-
-    if (finalPhone.length < 11) {
-      Alert.alert('Invalid Phone', 'Valid phone number enter karo.');
-      return false;
+      errors.phone = 'Phone number required hai.';
+    } else if (finalPhone.length < 11) {
+      errors.phone = 'Valid phone number enter karo. Example: 03001234567';
     }
 
     if (!editingStaff && !form.password.trim()) {
-      Alert.alert('Required', 'Password required hai.');
-      return false;
+      errors.password = 'Password required hai.';
+    } else if (!editingStaff && form.password.trim().length < 4) {
+      errors.password = 'Password kam az kam 4 characters ka rakho.';
     }
 
-    if (!editingStaff && form.password.trim().length < 4) {
-      Alert.alert('Weak Password', 'Password kam az kam 4 characters ka rakho.');
-      return false;
+    if (!form.permissions.length) {
+      errors.permissions = 'Kam az kam 1 module select karo.';
     }
 
-    if (form.permissions.length === 0) {
-      Alert.alert('Required', 'Kam az kam 1 module select karo.');
+    setFieldErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      showNotice(
+        'warning',
+        'Required Fields Missing',
+        'Please highlighted fields complete karein phir save karein.'
+      );
+
       return false;
     }
 
@@ -390,8 +549,9 @@ const saveStaff = async () => {
         )
       );
 
-      Alert.alert(
-        'Success',
+      showNotice(
+        'success',
+        'Employee Updated',
         'Employee updated successfully. Agar ye employee login hai to logout/login dobara kare.'
       );
     } else {
@@ -421,8 +581,9 @@ const saveStaff = async () => {
 
       await loadStaff();
 
-      Alert.alert(
-        'Success',
+      showNotice(
+        'success',
+        'Employee Created',
         'Employee created successfully.'
       );
     }
@@ -435,12 +596,7 @@ const saveStaff = async () => {
         error.message
     );
 
-    const message =
-      error.response?.data?.message ||
-      error.response?.data?.error ||
-      'Employee save nahi ho saka.';
-
-    Alert.alert('Error', message);
+    showApiError('Save Failed', 'Employee save nahi ho saka.', error);
   } finally {
     setSaving(false);
   }
@@ -451,26 +607,30 @@ const saveStaff = async () => {
     confirmText: string,
     onConfirm: () => void
   ) => {
-    if (Platform.OS === 'web') {
-      const confirmed = (globalThis as any).confirm
-        ? (globalThis as any).confirm(`${title}\n\n${message}`)
-        : true;
+    setConfirmDialog({
+      visible: true,
+      title,
+      message,
+      confirmText,
+      destructive:
+        confirmText.toLowerCase().includes('delete') ||
+        confirmText.toLowerCase().includes('deactivate'),
+      onConfirm,
+    });
+  };
 
-      if (confirmed) {
-        onConfirm();
-      }
+  const closeConfirmDialog = () => {
+    setConfirmDialog(emptyConfirm);
+  };
 
-      return;
+  const handleConfirmDialogAction = () => {
+    const action = confirmDialog.onConfirm;
+
+    closeConfirmDialog();
+
+    if (action) {
+      action();
     }
-
-    Alert.alert(title, message, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: confirmText,
-        style: 'destructive',
-        onPress: onConfirm,
-      },
-    ]);
   };
 
   const performStatusUpdate = async (item: StaffUser, newStatus: boolean) => {
@@ -487,8 +647,9 @@ const saveStaff = async () => {
         prev.map(x => (x.id === item.id ? { ...x, isActive: newStatus } : x))
       );
 
-      Alert.alert(
-        'Success',
+      showNotice(
+        'success',
+        newStatus ? 'Employee Activated' : 'Employee Deactivated',
         newStatus
           ? 'Employee activated successfully.'
           : 'Employee deactivated successfully.'
@@ -499,10 +660,7 @@ const saveStaff = async () => {
         error.response?.data || error.message
       );
 
-      Alert.alert(
-        'Error',
-        error.response?.data?.message || 'Status update nahi hua.'
-      );
+      showApiError('Status Update Failed', 'Status update nahi hua.', error);
     } finally {
       setLoading(false);
     }
@@ -533,14 +691,15 @@ const saveStaff = async () => {
         prev.map(x => (x.id === item.id ? { ...x, isActive: false } : x))
       );
 
-      Alert.alert('Success', 'Employee deleted/deactivated successfully.');
+      showNotice(
+        'success',
+        'Employee Deactivated',
+        'Employee deleted/deactivated successfully.'
+      );
     } catch (error: any) {
       console.log('Delete staff error:', error.response?.data || error.message);
 
-      Alert.alert(
-        'Error',
-        error.response?.data?.message || 'Employee deactivate nahi hua.'
-      );
+      showApiError('Delete Failed', 'Employee deactivate nahi hua.', error);
     } finally {
       setLoading(false);
     }
@@ -819,7 +978,9 @@ Sirf allowed modules employee ko assign karein
                   label="Employee Name"
                   placeholder="Ali Counter"
                   value={form.name}
-                  onChangeText={text => setForm({ ...form, name: text })}
+                  required
+                  error={fieldErrors.name}
+                  onChangeText={text => updateFormField('name', text)}
                 />
 
                 <Input
@@ -828,7 +989,9 @@ Sirf allowed modules employee ko assign karein
                   value={form.phone}
                   keyboardType="phone-pad"
                   editable={!editingStaff}
-                  onChangeText={text => setForm({ ...form, phone: text })}
+                  required={!editingStaff}
+                  error={fieldErrors.phone}
+                  onChangeText={text => updateFormField('phone', text)}
                 />
 
                 <Input
@@ -836,7 +999,8 @@ Sirf allowed modules employee ko assign karein
                   placeholder="employee@gmail.com"
                   value={form.email}
                   keyboardType="email-address"
-                  onChangeText={text => setForm({ ...form, email: text })}
+                  error={fieldErrors.email}
+                  onChangeText={text => updateFormField('email', text)}
                 />
 
                 <Input
@@ -846,7 +1010,9 @@ Sirf allowed modules employee ko assign karein
                   }
                   value={form.password}
                   secureTextEntry
-                  onChangeText={text => setForm({ ...form, password: text })}
+                  required={!editingStaff}
+                  error={fieldErrors.password}
+                  onChangeText={text => updateFormField('password', text)}
                 />
 
                 <Text style={styles.fieldLabel}>Quick Permission Presets</Text>
@@ -911,6 +1077,13 @@ Sirf allowed modules employee ko assign karein
                   })}
                 </View>
 
+                {!!fieldErrors.permissions && (
+                  <View style={styles.inlineErrorBox}>
+                    <Ionicons name="alert-circle-outline" size={15} color="#DC2626" />
+                    <Text style={styles.inlineErrorText}>{fieldErrors.permissions}</Text>
+                  </View>
+                )}
+
                 <TouchableOpacity
                   style={[styles.saveBtn, saving && { opacity: 0.7 }]}
                   onPress={saveStaff}
@@ -940,6 +1113,15 @@ Sirf allowed modules employee ko assign karein
             </View>
           </View>
         </Modal>
+
+
+        <NoticeModal notice={notice} onClose={closeNotice} />
+
+        <ConfirmModal
+          confirmDialog={confirmDialog}
+          onCancel={closeConfirmDialog}
+          onConfirm={handleConfirmDialogAction}
+        />
       </View>
     </>
   );
@@ -953,6 +1135,8 @@ function Input({
   keyboardType = 'default',
   secureTextEntry = false,
   editable = true,
+  required = false,
+  error,
 }: {
   label: string;
   placeholder: string;
@@ -961,13 +1145,22 @@ function Input({
   keyboardType?: any;
   secureTextEntry?: boolean;
   editable?: boolean;
+  required?: boolean;
+  error?: string;
 }) {
   return (
     <View style={styles.inputGroup}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.labelRow}>
+        <Text style={styles.fieldLabel}>{label}</Text>
+        {required && <Text style={styles.requiredMark}>Required</Text>}
+      </View>
 
       <TextInput
-        style={[styles.input, !editable && styles.inputDisabled]}
+        style={[
+          styles.input,
+          !editable && styles.inputDisabled,
+          !!error && styles.inputError,
+        ]}
         placeholder={placeholder}
         placeholderTextColor="#94A3B8"
         value={value}
@@ -976,7 +1169,116 @@ function Input({
         secureTextEntry={secureTextEntry}
         editable={editable}
       />
+
+      {!!error && (
+        <View style={styles.inputErrorRow}>
+          <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+          <Text style={styles.inputErrorText}>{error}</Text>
+        </View>
+      )}
     </View>
+  );
+}
+
+function NoticeModal({
+  notice,
+  onClose,
+}: {
+  notice: NoticeState;
+  onClose: () => void;
+}) {
+  if (!notice.visible) return null;
+
+  const iconName =
+    notice.type === 'success'
+      ? 'checkmark-circle-outline'
+      : notice.type === 'warning'
+        ? 'warning-outline'
+        : notice.type === 'error'
+          ? 'alert-circle-outline'
+          : 'information-circle-outline';
+
+  const accentColor =
+    notice.type === 'success'
+      ? '#16A34A'
+      : notice.type === 'warning'
+        ? '#F59E0B'
+        : notice.type === 'error'
+          ? '#DC2626'
+          : '#2563EB';
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.feedbackOverlay}>
+        <View style={styles.feedbackCard}>
+          <View style={[styles.feedbackIconWrap, { backgroundColor: `${accentColor}18` }]}>
+            <Ionicons name={iconName as any} size={34} color={accentColor} />
+          </View>
+
+          <Text style={styles.feedbackTitle}>{notice.title}</Text>
+          <Text style={styles.feedbackMessage}>{notice.message}</Text>
+
+          {!!notice.details && (
+            <ScrollView style={styles.feedbackDetailsBox}>
+              <Text style={styles.feedbackDetailsText}>{notice.details}</Text>
+            </ScrollView>
+          )}
+
+          <TouchableOpacity
+            style={[styles.feedbackButton, { backgroundColor: accentColor }]}
+            onPress={onClose}
+          >
+            <Text style={styles.feedbackButtonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ConfirmModal({
+  confirmDialog,
+  onCancel,
+  onConfirm,
+}: {
+  confirmDialog: ConfirmState;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!confirmDialog.visible) return null;
+
+  const confirmColor = confirmDialog.destructive ? '#DC2626' : '#1A5F2B';
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={styles.feedbackOverlay}>
+        <View style={styles.feedbackCard}>
+          <View style={[styles.feedbackIconWrap, { backgroundColor: `${confirmColor}18` }]}>
+            <Ionicons
+              name={confirmDialog.destructive ? 'trash-outline' : 'help-circle-outline'}
+              size={32}
+              color={confirmColor}
+            />
+          </View>
+
+          <Text style={styles.feedbackTitle}>{confirmDialog.title}</Text>
+          <Text style={styles.feedbackMessage}>{confirmDialog.message}</Text>
+
+          <View style={styles.confirmActionRow}>
+            <TouchableOpacity style={styles.confirmCancelBtn} onPress={onCancel}>
+              <Text style={styles.confirmCancelText}>Cancel</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.confirmConfirmBtn, { backgroundColor: confirmColor }]}
+              onPress={onConfirm}
+            >
+              <Text style={styles.confirmConfirmText}>{confirmDialog.confirmText}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1527,5 +1829,173 @@ const styles = StyleSheet.create({
   cancelModalText: {
     color: '#94A3B8',
     fontWeight: '800',
+  },
+
+
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 7,
+  },
+
+  requiredMark: {
+    backgroundColor: '#FEE2E2',
+    color: '#DC2626',
+    fontSize: 10,
+    fontWeight: '900',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 30,
+    overflow: 'hidden',
+  },
+
+  inputError: {
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
+  },
+
+  inputErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 6,
+  },
+
+  inputErrorText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
+  },
+
+  inlineErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    marginBottom: 12,
+  },
+
+  inlineErrorText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '800',
+    flex: 1,
+  },
+
+  feedbackOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.52)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+  },
+
+  feedbackCard: {
+    width: '100%',
+    maxWidth: 430,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 22,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+
+  feedbackIconWrap: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+
+  feedbackTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+
+  feedbackMessage: {
+    fontSize: 14,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 21,
+    marginTop: 8,
+  },
+
+  feedbackDetailsBox: {
+    width: '100%',
+    maxHeight: 120,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
+    marginTop: 12,
+    padding: 10,
+  },
+
+  feedbackDetailsText: {
+    color: '#64748B',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+
+  feedbackButton: {
+    width: '100%',
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+  },
+
+  feedbackButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 14,
+  },
+
+  confirmActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+    marginTop: 20,
+  },
+
+  confirmCancelBtn: {
+    flex: 1,
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+
+  confirmCancelText: {
+    color: '#475569',
+    fontWeight: '900',
+  },
+
+  confirmConfirmBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+
+  confirmConfirmText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
   },
 });

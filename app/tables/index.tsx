@@ -4,7 +4,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Alert,
   TextInput,
   Modal,
   ActivityIndicator,
@@ -29,6 +28,33 @@ interface Table {
   status: number;
 }
 
+type DialogType = 'success' | 'error' | 'warning' | 'info' | 'confirm';
+
+interface AppDialogState {
+  visible: boolean;
+  type: DialogType;
+  title: string;
+  message: string;
+  confirmText: string;
+  cancelText?: string;
+  onConfirm?: (() => void | Promise<void>) | null;
+}
+
+interface FormErrors {
+  tableNumber?: string;
+  capacity?: string;
+}
+
+const emptyDialog: AppDialogState = {
+  visible: false,
+  type: 'info',
+  title: '',
+  message: '',
+  confirmText: 'OK',
+  cancelText: 'Cancel',
+  onConfirm: null,
+};
+
 export default function TablesScreen() {
   const [tables, setTables] = useState<Table[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -40,10 +66,96 @@ export default function TablesScreen() {
 
   const [tableNumber, setTableNumber] = useState<string>('');
   const [capacity, setCapacity] = useState<string>('4');
+  const [formErrors, setFormErrors] = useState<FormErrors>({});
+  const [appDialog, setAppDialog] = useState<AppDialogState>(emptyDialog);
 
   useEffect(() => {
     loadTables();
   }, []);
+
+  const showDialog = ({
+    type = 'info',
+    title,
+    message,
+    confirmText = 'OK',
+    cancelText = 'Cancel',
+    onConfirm = null,
+  }: {
+    type?: DialogType;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: (() => void | Promise<void>) | null;
+  }) => {
+    setAppDialog({
+      visible: true,
+      type,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      onConfirm,
+    });
+  };
+
+  const closeDialog = () => {
+    setAppDialog(emptyDialog);
+  };
+
+  const handleDialogConfirm = async () => {
+    const action = appDialog.onConfirm;
+    closeDialog();
+
+    if (action) {
+      await action();
+    }
+  };
+
+  const getApiErrorMessage = (error: any, fallback: string) => {
+    if (!error?.response) {
+      if (error?.message?.toLowerCase?.().includes('network')) {
+        return 'Network issue aa raha hai. Internet connection ya server availability check karein.';
+      }
+
+      return error?.message || fallback;
+    }
+
+    const status = error.response?.status;
+    const serverMessage =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.response?.data?.title ||
+      '';
+
+    if (serverMessage) return serverMessage;
+
+    if (status === 400) {
+      return 'Invalid data sent. Please check required fields and try again.';
+    }
+
+    if (status === 401) {
+      return 'Session expired. Please login again.';
+    }
+
+    if (status === 403) {
+      return 'Access denied. Tables permission check karein.';
+    }
+
+    if (status === 404) {
+      return 'Requested table/API endpoint not found.';
+    }
+
+    if (status === 405) {
+      return 'This API action is not supported by backend. Backend endpoint/method check karein.';
+    }
+
+    if (status >= 500) {
+      return 'Server error aa raha hai. Backend/API logs check karein.';
+    }
+
+    return fallback;
+  };
 
   const normalizeArray = (data: any) => {
     if (Array.isArray(data)) return data;
@@ -58,16 +170,22 @@ export default function TablesScreen() {
       const response = await api.get('/restaurant/tables');
       const tableList = normalizeArray(response.data);
 
-      console.log('Tables loaded:', tableList);
-
       setTables(tableList);
     } catch (error: any) {
       console.error('Load tables error:', error.response?.data || error.message);
 
-      Alert.alert(
-        'Error',
-        error.response?.data?.message || 'Failed to load tables'
-      );
+      const message = getApiErrorMessage(error, 'Failed to load tables.');
+
+      showDialog({
+        type: 'error',
+        title: 'Tables Load Failed',
+        message,
+        confirmText: error?.response?.status === 401 ? 'Login Again' : 'OK',
+        onConfirm:
+          error?.response?.status === 401
+            ? () => router.replace('/(auth)/login')
+            : null,
+      });
     } finally {
       setLoading(false);
     }
@@ -77,6 +195,7 @@ export default function TablesScreen() {
     setEditingTable(null);
     setTableNumber('');
     setCapacity('4');
+    setFormErrors({});
     setModalVisible(true);
   };
 
@@ -84,28 +203,75 @@ export default function TablesScreen() {
     setEditingTable(item);
     setTableNumber(String(item.tableNumber || ''));
     setCapacity(String(item.capacity || 4));
+    setFormErrors({});
     setModalVisible(true);
   };
 
   const closeModal = () => {
+    if (saving) return;
+
     setModalVisible(false);
     setEditingTable(null);
     setTableNumber('');
     setCapacity('4');
+    setFormErrors({});
+  };
+
+  const updateTableNumber = (value: string) => {
+    setTableNumber(value);
+
+    if (formErrors.tableNumber) {
+      setFormErrors(prev => ({ ...prev, tableNumber: undefined }));
+    }
+  };
+
+  const updateCapacity = (value: string) => {
+    setCapacity(value.replace(/[^0-9]/g, ''));
+
+    if (formErrors.capacity) {
+      setFormErrors(prev => ({ ...prev, capacity: undefined }));
+    }
+  };
+
+  const validateForm = () => {
+    const errors: FormErrors = {};
+    const finalTableNumber = tableNumber.trim();
+    const finalCapacity = capacity.trim();
+    const parsedCapacity = parseInt(finalCapacity, 10);
+
+    if (!finalTableNumber) {
+      errors.tableNumber = 'Table number is required.';
+    } else if (finalTableNumber.length > 10) {
+      errors.tableNumber = 'Table number must be 10 characters or less.';
+    }
+
+    if (!finalCapacity) {
+      errors.capacity = 'Capacity is required.';
+    } else if (Number.isNaN(parsedCapacity) || parsedCapacity <= 0) {
+      errors.capacity = 'Please enter a valid capacity.';
+    } else if (parsedCapacity > 99) {
+      errors.capacity = 'Capacity cannot be greater than 99.';
+    }
+
+    setFormErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      showDialog({
+        type: 'warning',
+        title: 'Required Fields',
+        message: 'Please correct the highlighted fields before saving.',
+      });
+
+      return false;
+    }
+
+    return true;
   };
 
   const handleSaveTable = async () => {
-    if (!tableNumber.trim()) {
-      Alert.alert('Error', 'Please enter table number');
-      return;
-    }
+    if (!validateForm()) return;
 
-    const parsedCapacity = parseInt(capacity, 10);
-
-    if (Number.isNaN(parsedCapacity) || parsedCapacity <= 0) {
-      Alert.alert('Error', 'Please enter valid capacity');
-      return;
-    }
+    const parsedCapacity = parseInt(capacity.trim(), 10);
 
     try {
       setSaving(true);
@@ -117,24 +283,21 @@ export default function TablesScreen() {
       };
 
       if (editingTable) {
-        console.log('Updating table:', editingTable.id, tableData);
+        await api.put(`/restaurant/tables/${editingTable.id}`, tableData);
 
-        const response = await api.put(
-          `/restaurant/tables/${editingTable.id}`,
-          tableData
-        );
-
-        console.log('Table updated:', response.data);
-
-        Alert.alert('Success', 'Table updated successfully');
+        showDialog({
+          type: 'success',
+          title: 'Table Updated',
+          message: `Table ${tableData.tableNumber} updated successfully.`,
+        });
       } else {
-        console.log('Adding table:', tableData);
+        await api.post('/restaurant/tables', tableData);
 
-        const response = await api.post('/restaurant/tables', tableData);
-
-        console.log('Table added:', response.data);
-
-        Alert.alert('Success', 'Table added successfully');
+        showDialog({
+          type: 'success',
+          title: 'Table Added',
+          message: `Table ${tableData.tableNumber} added successfully.`,
+        });
       }
 
       closeModal();
@@ -142,19 +305,14 @@ export default function TablesScreen() {
     } catch (error: any) {
       console.error('Save table error:', error.response?.data || error.message);
 
-      let errorMessage = editingTable
-        ? 'Failed to update table'
-        : 'Failed to add table';
+      const fallback = editingTable ? 'Failed to update table.' : 'Failed to add table.';
+      const message = getApiErrorMessage(error, fallback);
 
-      if (error.response?.status === 405) {
-        errorMessage = 'API not supported. Backend mein update endpoint check karo.';
-      } else if (error.response?.status === 403) {
-        errorMessage = 'Access denied. Tables permission check karo.';
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      }
-
-      Alert.alert('Error', errorMessage);
+      showDialog({
+        type: 'error',
+        title: editingTable ? 'Update Failed' : 'Add Failed',
+        message,
+      });
     } finally {
       setSaving(false);
     }
@@ -164,34 +322,32 @@ export default function TablesScreen() {
     try {
       setDeletingId(item.id);
 
-      console.log('Deleting table:', item.id, item.tableNumber);
-
       const response = await api.delete(`/restaurant/tables/${item.id}`);
-
-      console.log('Table deleted:', response.data);
 
       setTables(prev => prev.filter(t => t.id !== item.id));
 
-      Alert.alert(
-        'Success',
-        response.data?.message || 'Table deleted successfully'
-      );
+      showDialog({
+        type: 'success',
+        title: 'Table Deleted',
+        message: response.data?.message || `Table ${item.tableNumber} deleted successfully.`,
+      });
 
       await loadTables();
     } catch (error: any) {
       console.error('Delete table error:', error.response?.data || error.message);
 
-      let errorMessage = 'Failed to delete table';
+      let message = getApiErrorMessage(error, 'Failed to delete table.');
 
       if (error.response?.status === 405 || error.response?.status === 404) {
-        errorMessage = 'Delete API backend mein missing hai. RestaurantController mein DELETE /tables/{id} endpoint add karo.';
-      } else if (error.response?.status === 403) {
-        errorMessage = 'Access denied. Tables permission check karo.';
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
+        message =
+          'Delete API backend mein missing hai. RestaurantController mein DELETE /tables/{id} endpoint add karein.';
       }
 
-      Alert.alert('Error', errorMessage);
+      showDialog({
+        type: 'error',
+        title: 'Delete Failed',
+        message,
+      });
     } finally {
       setDeletingId(null);
     }
@@ -204,33 +360,25 @@ export default function TablesScreen() {
       ? `Table ${item.tableNumber} abhi occupied hai. Delete karne se dine-in flow disturb ho sakta hai. Phir bhi delete karni hai?`
       : `Table ${item.tableNumber} delete karni hai?`;
 
-    if (Platform.OS === 'web') {
-      const confirmed = (globalThis as any).confirm
-        ? (globalThis as any).confirm(message)
-        : true;
-
-      if (confirmed) {
-        performDeleteTable(item);
-      }
-
-      return;
-    }
-
-    Alert.alert('Delete Table?', message, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => performDeleteTable(item),
-      },
-    ]);
+    showDialog({
+      type: 'confirm',
+      title: 'Delete Table?',
+      message,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      onConfirm: () => performDeleteTable(item),
+    });
   };
 
   const openTableOrder = (item: Table) => {
     const isOccupied = item.status === 1;
 
     if (isOccupied) {
-      Alert.alert('Table Occupied', 'This table is currently occupied');
+      showDialog({
+        type: 'warning',
+        title: 'Table Occupied',
+        message: 'This table is currently occupied. Please choose an available table.',
+      });
       return;
     }
 
@@ -242,6 +390,60 @@ export default function TablesScreen() {
         type: 'dinein',
       },
     });
+  };
+
+  const getDialogIcon = () => {
+    if (appDialog.type === 'success') return 'checkmark-circle';
+    if (appDialog.type === 'error') return 'alert-circle';
+    if (appDialog.type === 'warning') return 'warning';
+    if (appDialog.type === 'confirm') return 'help-circle';
+    return 'information-circle';
+  };
+
+  const getDialogColor = () => {
+    if (appDialog.type === 'success') return '#16A34A';
+    if (appDialog.type === 'error') return '#DC2626';
+    if (appDialog.type === 'warning') return '#F59E0B';
+    if (appDialog.type === 'confirm') return '#F59E0B';
+    return '#1A5F2B';
+  };
+
+  const renderAppDialog = () => {
+    const isConfirm = appDialog.type === 'confirm';
+    const color = getDialogColor();
+
+    return (
+      <Modal visible={appDialog.visible} transparent animationType="fade" onRequestClose={closeDialog}>
+        <View style={styles.dialogOverlay}>
+          <View style={styles.dialogBox}>
+            <View style={[styles.dialogIconWrap, { backgroundColor: `${color}1A` }]}>
+              <Ionicons name={getDialogIcon() as any} size={42} color={color} />
+            </View>
+
+            <Text style={styles.dialogTitle}>{appDialog.title}</Text>
+            <Text style={styles.dialogMessage}>{appDialog.message}</Text>
+
+            <View style={styles.dialogActions}>
+              {isConfirm && (
+                <TouchableOpacity style={styles.dialogCancelBtn} onPress={closeDialog}>
+                  <Text style={styles.dialogCancelText}>{appDialog.cancelText || 'Cancel'}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.dialogConfirmBtn,
+                  { backgroundColor: isConfirm ? '#DC2626' : color },
+                ]}
+                onPress={handleDialogConfirm}
+              >
+                <Text style={styles.dialogConfirmText}>{appDialog.confirmText || 'OK'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
   const TableCard = ({ item }: { item: Table }) => {
@@ -287,7 +489,9 @@ export default function TablesScreen() {
             style={({ pressed }) => [
               styles.editTableBtn,
               pressed && { opacity: 0.6 },
+              isDeleting && { opacity: 0.5 },
             ]}
+            disabled={isDeleting}
             onPress={() => openEditModal(item)}
           >
             <Ionicons name="create-outline" size={17} color="#1A5F2B" />
@@ -319,10 +523,14 @@ export default function TablesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#F5A623" />
-        <Text style={styles.loadingText}>Loading tables...</Text>
-      </View>
+      <>
+        <StatusBar style="light" />
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#F5A623" />
+          <Text style={styles.loadingText}>Loading tables...</Text>
+          {renderAppDialog()}
+        </View>
+      </>
     );
   }
 
@@ -392,26 +600,42 @@ export default function TablesScreen() {
               <Text style={styles.label}>Table Number *</Text>
 
               <TextInput
-                style={styles.input}
+                style={[styles.input, formErrors.tableNumber && styles.inputError]}
                 placeholder="e.g., 5"
                 placeholderTextColor="#94A3B8"
                 value={tableNumber}
-                onChangeText={setTableNumber}
+                onChangeText={updateTableNumber}
                 keyboardType="default"
                 maxLength={10}
+                editable={!saving}
               />
+
+              {!!formErrors.tableNumber && (
+                <View style={styles.errorRow}>
+                  <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+                  <Text style={styles.errorText}>{formErrors.tableNumber}</Text>
+                </View>
+              )}
 
               <Text style={styles.label}>Capacity *</Text>
 
               <TextInput
-                style={styles.input}
+                style={[styles.input, formErrors.capacity && styles.inputError]}
                 placeholder="4"
                 placeholderTextColor="#94A3B8"
                 value={capacity}
-                onChangeText={setCapacity}
+                onChangeText={updateCapacity}
                 keyboardType="numeric"
                 maxLength={2}
+                editable={!saving}
               />
+
+              {!!formErrors.capacity && (
+                <View style={styles.errorRow}>
+                  <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+                  <Text style={styles.errorText}>{formErrors.capacity}</Text>
+                </View>
+              )}
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity
@@ -441,6 +665,8 @@ export default function TablesScreen() {
             </LinearGradient>
           </View>
         </Modal>
+
+        {renderAppDialog()}
       </View>
     </>
   );
@@ -646,6 +872,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#9CA3AF',
     marginBottom: 24,
+    textAlign: 'center',
   },
 
   emptyAddButton: {
@@ -716,14 +943,33 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1F2937',
     backgroundColor: '#F9FAFB',
-    marginBottom: 16,
+    marginBottom: 6,
+  },
+
+  inputError: {
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
+  },
+
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 10,
+  },
+
+  errorText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
 
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 12,
-    marginTop: 8,
+    marginTop: 14,
   },
 
   cancelBtn: {
@@ -755,5 +1001,87 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+
+  dialogOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+
+  dialogBox: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 22,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 18,
+  },
+
+  dialogIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+
+  dialogTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+
+  dialogMessage: {
+    fontSize: 14,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+
+  dialogActions: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 10,
+    marginTop: 20,
+  },
+
+  dialogCancelBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+  },
+
+  dialogCancelText: {
+    color: '#64748B',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  dialogConfirmBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  dialogConfirmText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });

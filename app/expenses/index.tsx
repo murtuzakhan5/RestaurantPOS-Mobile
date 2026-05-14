@@ -5,14 +5,15 @@ import {
   TextInput,
   TouchableOpacity,
   FlatList,
-  Alert,
   ScrollView,
   Platform,
   ActivityIndicator,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { useEffect, useState } from 'react';
 import * as Print from 'expo-print';
+import { router } from 'expo-router';
 import api from '../services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -29,6 +30,32 @@ interface Expense {
 }
 
 type RangeType = 'daily' | 'monthly' | 'yearly' | 'custom';
+type DialogType = 'success' | 'error' | 'warning' | 'info' | 'confirm';
+
+interface AppDialogState {
+  visible: boolean;
+  type: DialogType;
+  title: string;
+  message: string;
+  confirmText: string;
+  cancelText?: string;
+  onConfirm?: (() => void | Promise<void>) | null;
+}
+
+interface FormErrors {
+  category?: string;
+  amount?: string;
+}
+
+const emptyDialog: AppDialogState = {
+  visible: false,
+  type: 'info',
+  title: '',
+  message: '',
+  confirmText: 'OK',
+  cancelText: 'Cancel',
+  onConfirm: null,
+};
 
 export default function ExpensesScreen() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -41,6 +68,9 @@ export default function ExpensesScreen() {
   const [rangeType, setRangeType] = useState<RangeType>('daily');
   const [loading, setLoading] = useState(false);
   const [printing, setPrinting] = useState(false);
+
+  const [formErrors, setFormErrors] = useState<FormErrors>({});
+  const [appDialog, setAppDialog] = useState<AppDialogState>(emptyDialog);
 
   const today = new Date();
 
@@ -60,12 +90,132 @@ export default function ExpensesScreen() {
     applyFilter();
   }, [expenses, startDate, endDate]);
 
+  const showDialog = ({
+    type = 'info',
+    title,
+    message,
+    confirmText = 'OK',
+    cancelText = 'Cancel',
+    onConfirm = null,
+  }: {
+    type?: DialogType;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: (() => void | Promise<void>) | null;
+  }) => {
+    setAppDialog({
+      visible: true,
+      type,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      onConfirm,
+    });
+  };
+
+  const closeDialog = () => {
+    setAppDialog(emptyDialog);
+  };
+
+  const handleDialogConfirm = async () => {
+    const action = appDialog.onConfirm;
+    closeDialog();
+
+    if (action) {
+      await action();
+    }
+  };
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/dashboard');
+  };
+
+  const getApiErrorMessage = (error: any, fallback: string) => {
+    if (!error?.response) {
+      if (error?.message?.toLowerCase?.().includes('network')) {
+        return 'Network issue aa raha hai. Internet connection ya server availability check karein.';
+      }
+
+      return error?.message || fallback;
+    }
+
+    const status = error.response?.status;
+    const serverMessage =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.response?.data?.title ||
+      '';
+
+    if (serverMessage) return serverMessage;
+
+    if (status === 400) {
+      return 'Invalid data sent. Please check required fields and try again.';
+    }
+
+    if (status === 401) {
+      return 'Session expired. Please login again.';
+    }
+
+    if (status === 403) {
+      return 'Access denied. Expenses permission check karein.';
+    }
+
+    if (status === 404) {
+      return 'Requested expense/API endpoint not found.';
+    }
+
+    if (status === 405) {
+      return 'This API action is not supported by backend. Backend endpoint/method check karein.';
+    }
+
+    if (status >= 500) {
+      return 'Server error aa raha hai. Backend/API logs check karein.';
+    }
+
+    return fallback;
+  };
+
+  const updateCategory = (value: string) => {
+    setCategory(value);
+
+    if (formErrors.category) {
+      setFormErrors(prev => ({ ...prev, category: undefined }));
+    }
+  };
+
+  const updateAmount = (value: string) => {
+    const numericValue = value.replace(/[^0-9.]/g, '');
+    setAmount(numericValue);
+
+    if (formErrors.amount) {
+      setFormErrors(prev => ({ ...prev, amount: undefined }));
+    }
+  };
+
   const loadExpenses = async () => {
     try {
+      setLoading(true);
+
       const res = await api.get('/Restaurant/expenses');
       setExpenses(res.data || []);
-    } catch (error) {
-      console.log('Load expenses error:', error);
+    } catch (error: any) {
+      console.log('Load expenses error:', error.response?.data || error.message);
+
+      showDialog({
+        type: 'error',
+        title: 'Expenses Load Failed',
+        message: getApiErrorMessage(error, 'Failed to load expenses.'),
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -95,21 +245,49 @@ export default function ExpensesScreen() {
       const d = new Date(exp.expenseDate);
       return d >= startDate && d <= endDate;
     });
+
     setFiltered(data);
   };
 
-  const addExpense = async () => {
-    if (!category.trim() || !amount.trim()) {
-      Alert.alert('Error', 'Category and amount are required');
-      return;
-    }
-
+  const validateExpenseForm = () => {
+    const errors: FormErrors = {};
     const numericAmount = Number(amount);
 
-    if (Number.isNaN(numericAmount) || numericAmount <= 0) {
-      Alert.alert('Error', 'Please enter valid amount');
-      return;
+    if (!category.trim()) {
+      errors.category = 'Category is required.';
+    } else if (category.trim().length < 2) {
+      errors.category = 'Category must be at least 2 characters.';
+    } else if (category.trim().length > 50) {
+      errors.category = 'Category must be 50 characters or less.';
     }
+
+    if (!amount.trim()) {
+      errors.amount = 'Amount is required.';
+    } else if (Number.isNaN(numericAmount) || numericAmount <= 0) {
+      errors.amount = 'Please enter a valid amount.';
+    } else if (numericAmount > 99999999) {
+      errors.amount = 'Amount is too high.';
+    }
+
+    setFormErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      showDialog({
+        type: 'warning',
+        title: 'Required Fields',
+        message: 'Please correct the highlighted expense fields before saving.',
+      });
+
+      return false;
+    }
+
+    return true;
+  };
+
+  const addExpense = async () => {
+    if (!validateExpenseForm()) return;
+
+    const numericAmount = Number(amount);
 
     setLoading(true);
 
@@ -121,30 +299,64 @@ export default function ExpensesScreen() {
         expenseDate: new Date().toISOString(),
       };
 
-      await api.post('/Restaurant/expenses', payload);
-      setExpenses(prev => [{ ...payload, id: Date.now() }, ...prev]);
+      const response = await api.post('/Restaurant/expenses', payload);
+
+      const createdExpense = response?.data || { ...payload, id: Date.now() };
+
+      setExpenses(prev => [createdExpense, ...prev]);
       setCategory('');
       setAmount('');
       setDescription('');
-      Alert.alert('Success', 'Expense added successfully');
-    } catch (error) {
-      console.log('Add expense error:', error);
-      Alert.alert('Error', 'Failed to add expense');
+      setFormErrors({});
+
+      showDialog({
+        type: 'success',
+        title: 'Expense Added',
+        message: `${payload.category} expense added successfully.`,
+      });
+    } catch (error: any) {
+      console.log('Add expense error:', error.response?.data || error.message);
+
+      showDialog({
+        type: 'error',
+        title: 'Expense Save Failed',
+        message: getApiErrorMessage(error, 'Failed to add expense.'),
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const deleteExpense = (id?: number) => {
+  const performDeleteExpense = async (id?: number) => {
     if (!id) return;
-    Alert.alert('Delete Expense', 'This expense will be removed.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => setExpenses(prev => prev.filter(e => e.id !== id)),
-      },
-    ]);
+
+    setExpenses(prev => prev.filter(e => e.id !== id));
+
+    showDialog({
+      type: 'success',
+      title: 'Expense Deleted',
+      message: 'Expense removed successfully.',
+    });
+  };
+
+  const deleteExpense = (id?: number) => {
+    if (!id) {
+      showDialog({
+        type: 'warning',
+        title: 'Cannot Delete',
+        message: 'This expense does not have a valid ID.',
+      });
+      return;
+    }
+
+    showDialog({
+      type: 'confirm',
+      title: 'Delete Expense?',
+      message: 'This expense will be removed.',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      onConfirm: () => performDeleteExpense(id),
+    });
   };
 
   const totalExpense = filtered.reduce((sum, item) => sum + Number(item.amount), 0);
@@ -157,8 +369,10 @@ export default function ExpensesScreen() {
     if (!acc[item.category]) {
       acc[item.category] = { category: item.category, amount: 0, count: 0 };
     }
+
     acc[item.category].amount += Number(item.amount);
     acc[item.category].count += 1;
+
     return acc;
   }, {});
 
@@ -199,6 +413,7 @@ export default function ExpensesScreen() {
     const categoryRows = categoryData.length
       ? categoryData.map((item: any, index) => {
           const percent = totalExpense > 0 ? (item.amount / totalExpense) * 100 : 0;
+
           return `
             <tr>
               <td>${index + 1}</td>
@@ -436,7 +651,11 @@ export default function ExpensesScreen() {
 
   const printExpenseReport = async () => {
     if (filtered.length === 0) {
-      Alert.alert('No Expenses', 'Selected period mein koi expense record nahi hai');
+      showDialog({
+        type: 'warning',
+        title: 'No Expenses',
+        message: 'Selected period mein koi expense record nahi hai.',
+      });
       return;
     }
 
@@ -448,7 +667,11 @@ export default function ExpensesScreen() {
         const printWindow = window.open('', '_blank');
 
         if (!printWindow) {
-          Alert.alert('Popup Blocked', 'Please allow popups for printing.');
+          showDialog({
+            type: 'warning',
+            title: 'Popup Blocked',
+            message: 'Please allow browser popups for printing.',
+          });
           return;
         }
 
@@ -460,10 +683,69 @@ export default function ExpensesScreen() {
       }
     } catch (error: any) {
       console.log('Print expense report error:', error);
-      Alert.alert('Error', error?.message || 'Expense report print nahi hua');
+
+      showDialog({
+        type: 'error',
+        title: 'Print Failed',
+        message: error?.message || 'Expense report print nahi hua.',
+      });
     } finally {
       setPrinting(false);
     }
+  };
+
+  const getDialogIcon = () => {
+    if (appDialog.type === 'success') return 'checkmark-circle';
+    if (appDialog.type === 'error') return 'alert-circle';
+    if (appDialog.type === 'warning') return 'warning';
+    if (appDialog.type === 'confirm') return 'help-circle';
+    return 'information-circle';
+  };
+
+  const getDialogColor = () => {
+    if (appDialog.type === 'success') return '#16A34A';
+    if (appDialog.type === 'error') return '#DC2626';
+    if (appDialog.type === 'warning') return '#F59E0B';
+    if (appDialog.type === 'confirm') return '#F59E0B';
+    return '#1A5F2B';
+  };
+
+  const renderAppDialog = () => {
+    const isConfirm = appDialog.type === 'confirm';
+    const color = getDialogColor();
+
+    return (
+      <Modal visible={appDialog.visible} transparent animationType="fade" onRequestClose={closeDialog}>
+        <View style={styles.dialogOverlay}>
+          <View style={styles.dialogBox}>
+            <View style={[styles.dialogIconWrap, { backgroundColor: `${color}1A` }]}>
+              <Ionicons name={getDialogIcon() as any} size={42} color={color} />
+            </View>
+
+            <Text style={styles.dialogTitle}>{appDialog.title}</Text>
+            <Text style={styles.dialogMessage}>{appDialog.message}</Text>
+
+            <View style={styles.dialogActions}>
+              {isConfirm && (
+                <TouchableOpacity style={styles.dialogCancelBtn} onPress={closeDialog}>
+                  <Text style={styles.dialogCancelText}>{appDialog.cancelText || 'Cancel'}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.dialogConfirmBtn,
+                  { backgroundColor: isConfirm ? '#DC2626' : color },
+                ]}
+                onPress={handleDialogConfirm}
+              >
+                <Text style={styles.dialogConfirmText}>{appDialog.confirmText || 'OK'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
   const RangeButton = ({ title, type, onPress }: any) => (
@@ -492,6 +774,7 @@ export default function ExpensesScreen() {
         onChange={(e) => {
           const date = new Date(e.target.value);
           setRangeType('custom');
+
           if (label === 'From') {
             onChange(new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0));
           } else {
@@ -517,6 +800,7 @@ export default function ExpensesScreen() {
           <Ionicons name="cash-outline" size={20} color="#F5A623" />
         </LinearGradient>
       </View>
+
       <View style={styles.expenseInfo}>
         <Text style={styles.expenseCategory}>{item.category}</Text>
         <Text style={styles.expenseDesc}>{item.description || 'No description'}</Text>
@@ -524,8 +808,10 @@ export default function ExpensesScreen() {
           {new Date(item.expenseDate).toLocaleString('en-PK')}
         </Text>
       </View>
+
       <View style={styles.expenseRight}>
         <Text style={styles.expenseAmount}>₨ {Number(item.amount).toFixed(2)}</Text>
+
         <TouchableOpacity style={styles.deleteBtn} onPress={() => deleteExpense(item.id)}>
           <Ionicons name="trash-outline" size={16} color="#FFFFFF" />
         </TouchableOpacity>
@@ -536,10 +822,15 @@ export default function ExpensesScreen() {
   return (
     <>
       <StatusBar style="light" />
+
       <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <LinearGradient colors={['#1A5F2B', '#0D3D1C']} style={styles.header}>
           <View style={styles.headerTopRow}>
-            <View>
+            <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
+              <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={styles.headerTextBox}>
               <Text style={styles.headerTitle}>Expense Management</Text>
               <Text style={styles.headerSubtitle}>Track your restaurant expenses</Text>
             </View>
@@ -562,23 +853,38 @@ export default function ExpensesScreen() {
           <Text style={styles.sectionTitle}>
             <Ionicons name="add-circle-outline" size={20} color="#1A5F2B" /> Add New Expense
           </Text>
-          
+
           <TextInput
             placeholder="Category (e.g., Rent, Food, Salary)"
             placeholderTextColor="#94A3B8"
             value={category}
-            onChangeText={setCategory}
-            style={styles.input}
+            onChangeText={updateCategory}
+            style={[styles.input, formErrors.category && styles.inputError]}
+            maxLength={50}
           />
+
+          {!!formErrors.category && (
+            <View style={styles.errorRow}>
+              <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+              <Text style={styles.errorText}>{formErrors.category}</Text>
+            </View>
+          )}
 
           <TextInput
             placeholder="Amount"
             placeholderTextColor="#94A3B8"
             value={amount}
-            onChangeText={setAmount}
+            onChangeText={updateAmount}
             keyboardType="numeric"
-            style={styles.input}
+            style={[styles.input, formErrors.amount && styles.inputError]}
           />
+
+          {!!formErrors.amount && (
+            <View style={styles.errorRow}>
+              <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+              <Text style={styles.errorText}>{formErrors.amount}</Text>
+            </View>
+          )}
 
           <TextInput
             placeholder="Description (optional)"
@@ -596,7 +902,11 @@ export default function ExpensesScreen() {
             activeOpacity={0.8}
           >
             <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.addGradient}>
-              <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
+              {loading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
+              )}
               <Text style={styles.addBtnText}>{loading ? 'Saving...' : 'Add Expense'}</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -664,6 +974,7 @@ export default function ExpensesScreen() {
           ) : (
             categoryData.map((item: any, index) => {
               const percent = totalExpense > 0 ? (item.amount / totalExpense) * 100 : 0;
+
               return (
                 <View key={item.category} style={styles.categoryRow}>
                   <View style={styles.categoryTop}>
@@ -672,6 +983,7 @@ export default function ExpensesScreen() {
                     </Text>
                     <Text style={styles.categoryAmount}>₨ {item.amount.toFixed(2)}</Text>
                   </View>
+
                   <View style={styles.progressTrack}>
                     <LinearGradient
                       colors={['#1A5F2B', '#F5A623']}
@@ -680,6 +992,7 @@ export default function ExpensesScreen() {
                       style={[styles.progressFill, { width: `${percent}%` }]}
                     />
                   </View>
+
                   <Text style={styles.categoryMeta}>{item.count} entries • {percent.toFixed(0)}%</Text>
                 </View>
               );
@@ -701,6 +1014,8 @@ export default function ExpensesScreen() {
           />
         </View>
       </ScrollView>
+
+      {renderAppDialog()}
     </>
   );
 }
@@ -722,6 +1037,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12,
+  },
+  backBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTextBox: {
+    flex: 1,
   },
   headerTitle: {
     fontSize: 26,
@@ -775,6 +1101,23 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontSize: 14,
     color: '#1F2937',
+  },
+  inputError: {
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: -4,
+    marginBottom: 10,
+  },
+  errorText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
   addBtn: {
     borderRadius: 50,
@@ -835,6 +1178,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     overflow: 'hidden',
   },
+  rangeBtnActive: {},
   rangeGradient: {
     paddingVertical: 10,
     alignItems: 'center',
@@ -999,5 +1343,77 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#9CA3AF',
     paddingVertical: 20,
+  },
+  dialogOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  dialogBox: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 22,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 18,
+  },
+  dialogIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  dialogTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  dialogMessage: {
+    fontSize: 14,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+  dialogActions: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 10,
+    marginTop: 20,
+  },
+  dialogCancelBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+  },
+  dialogCancelText: {
+    color: '#64748B',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  dialogConfirmBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogConfirmText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });

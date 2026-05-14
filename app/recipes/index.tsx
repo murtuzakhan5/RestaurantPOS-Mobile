@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
-  Alert,
+  Modal,
   RefreshControl,
   KeyboardTypeOptions,
 } from 'react-native';
@@ -15,6 +15,36 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import recipeApi, { ProductItem, RecipeIngredient } from '../services/recipeApi';
 import inventoryApi, { InventoryItem } from '../services/inventoryApi';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+
+type DialogType = 'success' | 'error' | 'warning' | 'info' | 'confirm';
+
+interface AppDialogState {
+  visible: boolean;
+  type: DialogType;
+  title: string;
+  message: string;
+  confirmText: string;
+  cancelText?: string;
+  onConfirm?: (() => void | Promise<void>) | null;
+}
+
+interface FormErrors {
+  selectedProduct?: string;
+  selectedInventoryItemId?: string;
+  quantity?: string;
+  ingredients?: string;
+}
+
+const emptyDialog: AppDialogState = {
+  visible: false,
+  type: 'info',
+  title: '',
+  message: '',
+  confirmText: 'OK',
+  cancelText: 'Cancel',
+  onConfirm: null,
+};
 
 export default function RecipeSetupScreen() {
   const [restaurantId, setRestaurantId] = useState<number>(1);
@@ -34,9 +64,105 @@ export default function RecipeSetupScreen() {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  const [formErrors, setFormErrors] = useState<FormErrors>({});
+  const [appDialog, setAppDialog] = useState<AppDialogState>(emptyDialog);
+
   useEffect(() => {
     init();
   }, []);
+
+  const showDialog = ({
+    type = 'info',
+    title,
+    message,
+    confirmText = 'OK',
+    cancelText = 'Cancel',
+    onConfirm = null,
+  }: {
+    type?: DialogType;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: (() => void | Promise<void>) | null;
+  }) => {
+    setAppDialog({
+      visible: true,
+      type,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      onConfirm,
+    });
+  };
+
+  const closeDialog = () => {
+    setAppDialog(emptyDialog);
+  };
+
+  const handleDialogConfirm = async () => {
+    const action = appDialog.onConfirm;
+    closeDialog();
+
+    if (action) {
+      await action();
+    }
+  };
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/dashboard');
+  };
+
+  const getApiErrorMessage = (error: any, fallback: string) => {
+    if (!error?.response) {
+      if (error?.message?.toLowerCase?.().includes('network')) {
+        return 'Network issue aa raha hai. Internet connection ya server availability check karein.';
+      }
+
+      return error?.message || fallback;
+    }
+
+    const status = error.response?.status;
+    const serverMessage =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.response?.data?.title ||
+      '';
+
+    if (serverMessage) return serverMessage;
+
+    if (status === 400) {
+      return 'Invalid data sent. Please check required fields and try again.';
+    }
+
+    if (status === 401) {
+      return 'Session expired. Please login again.';
+    }
+
+    if (status === 403) {
+      return 'Access denied. Recipe Setup permission check karein.';
+    }
+
+    if (status === 404) {
+      return 'Requested recipe/API endpoint not found.';
+    }
+
+    if (status === 405) {
+      return 'This API action is not supported by backend. Backend endpoint/method check karein.';
+    }
+
+    if (status >= 500) {
+      return 'Server error aa raha hai. Backend/API logs check karein.';
+    }
+
+    return fallback;
+  };
 
   const init = async () => {
     const id = await getRestaurantId();
@@ -78,7 +204,12 @@ export default function RecipeSetupScreen() {
       setInventoryItems(inventoryRes || []);
     } catch (error: any) {
       console.log('Recipe load error:', error.response?.data || error.message);
-      Alert.alert('Error', 'Products ya inventory load nahi ho saki.');
+
+      showDialog({
+        type: 'error',
+        title: 'Recipe Data Load Failed',
+        message: getApiErrorMessage(error, 'Products ya inventory load nahi ho saki.'),
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -97,6 +228,7 @@ export default function RecipeSetupScreen() {
       setRecipeId(null);
       setSelectedInventoryItemId(0);
       setQuantity('');
+      setFormErrors({});
       setLoading(true);
 
       const existingRecipe = await recipeApi.getRecipeByProduct(
@@ -110,7 +242,12 @@ export default function RecipeSetupScreen() {
       }
     } catch (error: any) {
       console.log('Get recipe error:', error.response?.data || error.message);
-      Alert.alert('Error', 'Recipe load nahi ho saki.');
+
+      showDialog({
+        type: 'error',
+        title: 'Recipe Load Failed',
+        message: getApiErrorMessage(error, 'Recipe load nahi ho saki.'),
+      });
     } finally {
       setLoading(false);
     }
@@ -131,28 +268,74 @@ export default function RecipeSetupScreen() {
     return item.unit.shortName || '';
   };
 
-  const handleAddIngredient = () => {
+  const updateSelectedInventoryItem = (id: number) => {
+    setSelectedInventoryItemId(id);
+
+    if (formErrors.selectedInventoryItemId) {
+      setFormErrors(prev => ({
+        ...prev,
+        selectedInventoryItemId: undefined,
+      }));
+    }
+  };
+
+  const updateQuantity = (value: string) => {
+    setQuantity(value.replace(/[^0-9.]/g, ''));
+
+    if (formErrors.quantity) {
+      setFormErrors(prev => ({
+        ...prev,
+        quantity: undefined,
+      }));
+    }
+  };
+
+  const validateIngredientForm = () => {
+    const errors: FormErrors = {};
+    const parsedQuantity = Number(quantity);
+
     if (!selectedProduct) {
-      Alert.alert('Required', 'Pehle product select karo.');
-      return;
+      errors.selectedProduct = 'Please select a product first.';
     }
 
     if (!selectedInventoryItemId) {
-      Alert.alert('Required', 'Inventory item select karo.');
-      return;
+      errors.selectedInventoryItemId = 'Inventory item is required.';
     }
 
-    if (!quantity || Number(quantity) <= 0) {
-      Alert.alert('Required', 'Valid quantity enter karo.');
-      return;
+    if (!quantity.trim()) {
+      errors.quantity = 'Quantity is required.';
+    } else if (Number.isNaN(parsedQuantity) || parsedQuantity <= 0) {
+      errors.quantity = 'Please enter a valid quantity.';
     }
+
+    setFormErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      showDialog({
+        type: 'warning',
+        title: 'Required Fields',
+        message: 'Please correct the highlighted fields before adding ingredient.',
+      });
+
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleAddIngredient = () => {
+    if (!validateIngredientForm()) return;
 
     const alreadyAdded = ingredients.some(
       x => x.inventoryItemId === selectedInventoryItemId
     );
 
     if (alreadyAdded) {
-      Alert.alert('Already Added', 'Ye ingredient already recipe mein added hai.');
+      showDialog({
+        type: 'warning',
+        title: 'Already Added',
+        message: 'Ye ingredient already recipe mein added hai.',
+      });
       return;
     }
 
@@ -166,6 +349,7 @@ export default function RecipeSetupScreen() {
     setIngredients(prev => [...prev, newIngredient]);
     setSelectedInventoryItemId(0);
     setQuantity('');
+    setFormErrors({});
   };
 
   const handleRemoveIngredient = (inventoryItemId: number) => {
@@ -174,34 +358,59 @@ export default function RecipeSetupScreen() {
     );
   };
 
-  const handleSaveRecipe = async () => {
+  const validateRecipeSave = () => {
+    const errors: FormErrors = {};
+
     if (!selectedProduct) {
-      Alert.alert('Required', 'Pehle product select karo.');
-      return;
+      errors.selectedProduct = 'Please select a product first.';
     }
 
     if (ingredients.length === 0) {
-      Alert.alert('Required', 'Kam se kam 1 ingredient add karo.');
-      return;
+      errors.ingredients = 'At least 1 ingredient is required.';
     }
+
+    setFormErrors(prev => ({
+      ...prev,
+      ...errors,
+    }));
+
+    if (Object.keys(errors).length > 0) {
+      showDialog({
+        type: 'warning',
+        title: 'Recipe Incomplete',
+        message: 'Please select product and add at least 1 ingredient before saving.',
+      });
+
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSaveRecipe = async () => {
+    if (!validateRecipeSave()) return;
 
     try {
       setSaving(true);
 
       await recipeApi.saveRecipe({
         restaurantId,
-        productId: selectedProduct.id,
-        name: `${selectedProduct.name} Recipe`,
+        productId: selectedProduct!.id,
+        name: `${selectedProduct!.name} Recipe`,
         items: ingredients.map(x => ({
           inventoryItemId: x.inventoryItemId,
           quantity: x.quantity,
         })),
       });
 
-      Alert.alert('Success', 'Recipe save ho gayi.');
+      showDialog({
+        type: 'success',
+        title: 'Recipe Saved',
+        message: `${selectedProduct!.name} recipe save ho gayi.`,
+      });
 
       const updatedRecipe = await recipeApi.getRecipeByProduct(
-        selectedProduct.id,
+        selectedProduct!.id,
         restaurantId
       );
 
@@ -211,7 +420,40 @@ export default function RecipeSetupScreen() {
       }
     } catch (error: any) {
       console.log('Save recipe error:', error.response?.data || error.message);
-      Alert.alert('Error', 'Recipe save nahi ho saki.');
+
+      showDialog({
+        type: 'error',
+        title: 'Recipe Save Failed',
+        message: getApiErrorMessage(error, 'Recipe save nahi ho saki.'),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const performDeleteRecipe = async () => {
+    if (!recipeId) return;
+
+    try {
+      setSaving(true);
+
+      await recipeApi.deleteRecipe(recipeId);
+      setRecipeId(null);
+      setIngredients([]);
+
+      showDialog({
+        type: 'success',
+        title: 'Recipe Deleted',
+        message: 'Recipe delete ho gayi.',
+      });
+    } catch (error: any) {
+      console.log('Delete recipe error:', error.response?.data || error.message);
+
+      showDialog({
+        type: 'error',
+        title: 'Recipe Delete Failed',
+        message: getApiErrorMessage(error, 'Recipe delete nahi ho saki.'),
+      });
     } finally {
       setSaving(false);
     }
@@ -219,31 +461,22 @@ export default function RecipeSetupScreen() {
 
   const handleDeleteRecipe = () => {
     if (!recipeId) {
-      Alert.alert('No Recipe', 'Is product ki saved recipe nahi hai.');
+      showDialog({
+        type: 'warning',
+        title: 'No Recipe',
+        message: 'Is product ki saved recipe nahi hai.',
+      });
       return;
     }
 
-    Alert.alert('Delete Recipe', 'Is recipe ko delete karna hai?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            setSaving(true);
-            await recipeApi.deleteRecipe(recipeId);
-            setRecipeId(null);
-            setIngredients([]);
-            Alert.alert('Success', 'Recipe delete ho gayi.');
-          } catch (error: any) {
-            console.log('Delete recipe error:', error.response?.data || error.message);
-            Alert.alert('Error', 'Recipe delete nahi ho saki.');
-          } finally {
-            setSaving(false);
-          }
-        },
-      },
-    ]);
+    showDialog({
+      type: 'confirm',
+      title: 'Delete Recipe?',
+      message: 'Is recipe ko delete karna hai?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      onConfirm: performDeleteRecipe,
+    });
   };
 
   const formatQty = (value: number) => {
@@ -251,12 +484,66 @@ export default function RecipeSetupScreen() {
     return Number.isInteger(num) ? `${num}` : num.toFixed(3);
   };
 
+  const getDialogIcon = () => {
+    if (appDialog.type === 'success') return 'checkmark-circle';
+    if (appDialog.type === 'error') return 'alert-circle';
+    if (appDialog.type === 'warning') return 'warning';
+    if (appDialog.type === 'confirm') return 'help-circle';
+    return 'information-circle';
+  };
+
+  const getDialogColor = () => {
+    if (appDialog.type === 'success') return '#16A34A';
+    if (appDialog.type === 'error') return '#DC2626';
+    if (appDialog.type === 'warning') return '#F59E0B';
+    if (appDialog.type === 'confirm') return '#F59E0B';
+    return '#1A5F2B';
+  };
+
+  const renderAppDialog = () => {
+    const isConfirm = appDialog.type === 'confirm';
+    const color = getDialogColor();
+
+    return (
+      <Modal visible={appDialog.visible} transparent animationType="fade" onRequestClose={closeDialog}>
+        <View style={styles.dialogOverlay}>
+          <View style={styles.dialogBox}>
+            <View style={[styles.dialogIconWrap, { backgroundColor: `${color}1A` }]}>
+              <Ionicons name={getDialogIcon() as any} size={42} color={color} />
+            </View>
+
+            <Text style={styles.dialogTitle}>{appDialog.title}</Text>
+            <Text style={styles.dialogMessage}>{appDialog.message}</Text>
+
+            <View style={styles.dialogActions}>
+              {isConfirm && (
+                <TouchableOpacity style={styles.dialogCancelBtn} onPress={closeDialog}>
+                  <Text style={styles.dialogCancelText}>{appDialog.cancelText || 'Cancel'}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.dialogConfirmBtn,
+                  { backgroundColor: isConfirm ? '#DC2626' : color },
+                ]}
+                onPress={handleDialogConfirm}
+              >
+                <Text style={styles.dialogConfirmText}>{appDialog.confirmText || 'OK'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
         >
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
@@ -280,6 +567,13 @@ export default function RecipeSetupScreen() {
           }
         >
           <Text style={styles.sectionTitle}>1. Select Product</Text>
+
+          {!!formErrors.selectedProduct && (
+            <View style={styles.errorRow}>
+              <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+              <Text style={styles.errorText}>{formErrors.selectedProduct}</Text>
+            </View>
+          )}
 
           <ScrollView
             horizontal
@@ -330,7 +624,12 @@ export default function RecipeSetupScreen() {
 
               <Text style={styles.inputLabel}>Select Inventory Item</Text>
 
-              <ScrollView style={styles.inventoryList}>
+              <ScrollView
+                style={[
+                  styles.inventoryList,
+                  formErrors.selectedInventoryItemId && styles.selectionErrorBox,
+                ]}
+              >
                 {inventoryItems.map(item => {
                   const active = selectedInventoryItemId === item.id;
 
@@ -341,7 +640,7 @@ export default function RecipeSetupScreen() {
                         styles.inventoryOption,
                         active && styles.inventoryOptionActive,
                       ]}
-                      onPress={() => setSelectedInventoryItemId(item.id)}
+                      onPress={() => updateSelectedInventoryItem(item.id)}
                     >
                       <Text
                         style={[
@@ -356,6 +655,13 @@ export default function RecipeSetupScreen() {
                 })}
               </ScrollView>
 
+              {!!formErrors.selectedInventoryItemId && (
+                <View style={styles.errorRow}>
+                  <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+                  <Text style={styles.errorText}>{formErrors.selectedInventoryItemId}</Text>
+                </View>
+              )}
+
               {inventoryItems.length === 0 && (
                 <View style={styles.emptyCard}>
                   <Text style={styles.emptyText}>
@@ -369,7 +675,8 @@ export default function RecipeSetupScreen() {
                 placeholder="Example: 1, 20, 150"
                 keyboardType="numeric"
                 value={quantity}
-                onChangeText={setQuantity}
+                error={formErrors.quantity}
+                onChangeText={updateQuantity}
               />
 
               <TouchableOpacity
@@ -380,6 +687,13 @@ export default function RecipeSetupScreen() {
               </TouchableOpacity>
 
               <Text style={styles.sectionTitle}>3. Current Recipe</Text>
+
+              {!!formErrors.ingredients && (
+                <View style={styles.errorRow}>
+                  <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+                  <Text style={styles.errorText}>{formErrors.ingredients}</Text>
+                </View>
+              )}
 
               {ingredients.length === 0 ? (
                 <View style={styles.emptyCard}>
@@ -417,7 +731,7 @@ export default function RecipeSetupScreen() {
               )}
 
               <TouchableOpacity
-                style={styles.saveButton}
+                style={[styles.saveButton, saving && { opacity: 0.7 }]}
                 onPress={handleSaveRecipe}
                 disabled={saving}
               >
@@ -430,7 +744,7 @@ export default function RecipeSetupScreen() {
 
               {recipeId && (
                 <TouchableOpacity
-                  style={styles.deleteButton}
+                  style={[styles.deleteButton, saving && { opacity: 0.7 }]}
                   onPress={handleDeleteRecipe}
                   disabled={saving}
                 >
@@ -443,12 +757,15 @@ export default function RecipeSetupScreen() {
           <View style={{ height: 30 }} />
         </ScrollView>
       )}
+
+      {renderAppDialog()}
     </View>
   );
 }
 
 function Input({
   label,
+  error,
   ...props
 }: {
   label: string;
@@ -456,15 +773,23 @@ function Input({
   value: string;
   onChangeText: (text: string) => void;
   keyboardType?: KeyboardTypeOptions;
+  error?: string;
 }) {
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.inputLabel}>{label}</Text>
       <TextInput
         {...props}
-        style={styles.input}
+        style={[styles.input, error && styles.inputError]}
         placeholderTextColor="#9CA3AF"
       />
+
+      {!!error && (
+        <View style={styles.errorRow}>
+          <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -577,7 +902,14 @@ const styles = StyleSheet.create({
   },
   inventoryList: {
     maxHeight: 180,
-    marginBottom: 12,
+    marginBottom: 8,
+  },
+  selectionErrorBox: {
+    borderWidth: 1,
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
+    borderRadius: 14,
+    padding: 4,
   },
   inventoryOption: {
     backgroundColor: '#FFFFFF',
@@ -610,6 +942,22 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     color: '#111827',
     fontSize: 15,
+  },
+  inputError: {
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 8,
+  },
+  errorText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
   addIngredientButton: {
     backgroundColor: '#F5A623',
@@ -682,5 +1030,77 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontWeight: '700',
     textAlign: 'center',
+  },
+  dialogOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  dialogBox: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 22,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 18,
+  },
+  dialogIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  dialogTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  dialogMessage: {
+    fontSize: 14,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+  dialogActions: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 10,
+    marginTop: 20,
+  },
+  dialogCancelBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+  },
+  dialogCancelText: {
+    color: '#64748B',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  dialogConfirmBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogConfirmText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
   },
 });

@@ -1,6 +1,6 @@
 import {
   View, Text, ScrollView, TouchableOpacity,
-  TextInput, Alert, StyleSheet, ActivityIndicator,
+  TextInput, StyleSheet, ActivityIndicator,
   Dimensions, Platform, Image, Modal,
 } from 'react-native';
 import { useState, useEffect, useRef } from 'react';
@@ -38,6 +38,32 @@ interface CartItem {
   image?: string | null;
   isCustom?: boolean;
 }
+
+type DialogType = 'success' | 'error' | 'warning' | 'info' | 'confirm';
+
+interface AppDialogState {
+  visible: boolean;
+  type: DialogType;
+  title: string;
+  message: string;
+  confirmText: string;
+  cancelText?: string;
+  onConfirm?: (() => void | Promise<void>) | null;
+}
+
+interface QuickBillErrors {
+  price?: string;
+}
+
+const emptyDialog: AppDialogState = {
+  visible: false,
+  type: 'info',
+  title: '',
+  message: '',
+  confirmText: 'OK',
+  cancelText: 'Cancel',
+  onConfirm: null,
+};
 
 const API_BASE_URL = 'https://billpak.runasp.net';
 
@@ -106,12 +132,110 @@ export default function DineInOrderScreen() {
   const [customPrice, setCustomPrice] = useState('');
   const [customQuantity, setCustomQuantity] = useState('1');
 
+  const [quickBillName, setQuickBillName] = useState('');
+  const [quickBillPrice, setQuickBillPrice] = useState('');
+  const [quickBillErrors, setQuickBillErrors] = useState<QuickBillErrors>({});
+  const [appDialog, setAppDialog] = useState<AppDialogState>(emptyDialog);
+
   const kotPrintLockRef = useRef(false);
 
   useEffect(() => {
     loadAll();
     loadCashierUser();
   }, [tableId]);
+
+  const showDialog = ({
+    type = 'info',
+    title,
+    message,
+    confirmText = 'OK',
+    cancelText = 'Cancel',
+    onConfirm = null,
+  }: {
+    type?: DialogType;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: (() => void | Promise<void>) | null;
+  }) => {
+    setAppDialog({
+      visible: true,
+      type,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      onConfirm,
+    });
+  };
+
+  const closeDialog = () => {
+    setAppDialog(emptyDialog);
+  };
+
+  const handleDialogConfirm = async () => {
+    const action = appDialog.onConfirm;
+    closeDialog();
+
+    if (action) {
+      await action();
+    }
+  };
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/dashboard');
+  };
+
+  const getApiErrorMessage = (error: any, fallback: string) => {
+    if (!error?.response) {
+      if (error?.message?.toLowerCase?.().includes('network')) {
+        return 'Network issue aa raha hai. Internet connection ya server availability check karein.';
+      }
+
+      return error?.message || fallback;
+    }
+
+    const status = error.response?.status;
+    const serverMessage =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.response?.data?.title ||
+      '';
+
+    if (serverMessage) return serverMessage;
+
+    if (status === 400) {
+      return 'Invalid data sent. Please check required fields and try again.';
+    }
+
+    if (status === 401) {
+      return 'Session expired. Please login again.';
+    }
+
+    if (status === 403) {
+      return 'Access denied. Dine-in order permission check karein.';
+    }
+
+    if (status === 404) {
+      return 'Requested order/API endpoint not found.';
+    }
+
+    if (status === 405) {
+      return 'This API action is not supported by backend. Backend endpoint/method check karein.';
+    }
+
+    if (status >= 500) {
+      return 'Server error aa raha hai. Backend/API logs check karein.';
+    }
+
+    return fallback;
+  };
 
   const loadCashierUser = async () => {
     try {
@@ -160,9 +284,14 @@ export default function DineInOrderScreen() {
     try {
       const response = await api.get('/restaurant/products');
       setProducts(response.data || []);
-    } catch (err) {
-      console.error('Products error:', err);
-      Alert.alert('Error', 'Products load nahi ho sake');
+    } catch (err: any) {
+      console.error('Products error:', err.response?.data || err.message || err);
+
+      showDialog({
+        type: 'error',
+        title: 'Products Load Failed',
+        message: getApiErrorMessage(err, 'Products load nahi ho sake.'),
+      });
     }
   };
 
@@ -245,25 +374,123 @@ export default function DineInOrderScreen() {
     setCart(prev => prev.filter(item => item.productId !== productId));
   };
 
+  const updateQuickBillName = (value: string) => {
+    setQuickBillName(value);
+  };
+
+  const updateQuickBillPrice = (value: string) => {
+    setQuickBillPrice(value.replace(/[^0-9.]/g, ''));
+
+    if (quickBillErrors.price) {
+      setQuickBillErrors({});
+    }
+  };
+
+  const addInlineCustomItemToCart = () => {
+    const name = quickBillName.trim() || '-';
+    const price = Number(quickBillPrice);
+
+    if (!quickBillPrice.trim()) {
+      setQuickBillErrors({ price: 'Price is required.' });
+      showDialog({
+        type: 'warning',
+        title: 'Price Required',
+        message: 'Please enter price before adding custom bill item.',
+      });
+      return;
+    }
+
+    if (Number.isNaN(price) || price <= 0) {
+      setQuickBillErrors({ price: 'Please enter a valid price.' });
+      showDialog({
+        type: 'warning',
+        title: 'Invalid Price',
+        message: 'Please enter a valid price greater than 0.',
+      });
+      return;
+    }
+
+    const customId = -Date.now();
+
+    setCart(prev => {
+      const existing = prev.find(
+        item =>
+          item.isCustom &&
+          item.name === name &&
+          Number(item.price) === price
+      );
+
+      if (existing) {
+        return prev.map(item =>
+          item.isCustom && item.name === name && Number(item.price) === price
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      }
+
+      return [
+        ...prev,
+        {
+          productId: customId,
+          name,
+          price,
+          quantity: 1,
+          image: null,
+          isCustom: true,
+        },
+      ];
+    });
+
+    setQuickBillName('');
+    setQuickBillPrice('');
+    setQuickBillErrors({});
+
+    showDialog({
+      type: 'success',
+      title: 'Item Added',
+      message: `${name} added to order.`,
+    });
+  };
+
   const addCustomItemToCart = () => {
-    const name = customName.trim();
+    const name = customName.trim() || '-';
     const price = Number(customPrice);
     const quantity = Number(customQuantity || 1);
-    if (!name) {
-      Alert.alert('Error', 'Custom item name required hai');
+
+    if (!customPrice.trim()) {
+      showDialog({
+        type: 'warning',
+        title: 'Price Required',
+        message: 'Please enter custom item price.',
+      });
       return;
     }
+
     if (Number.isNaN(price) || price <= 0) {
-      Alert.alert('Error', 'Valid price enter karo');
+      showDialog({
+        type: 'warning',
+        title: 'Invalid Price',
+        message: 'Valid price enter karo.',
+      });
       return;
     }
+
     if (Number.isNaN(quantity) || quantity <= 0) {
-      Alert.alert('Error', 'Valid quantity enter karo');
+      showDialog({
+        type: 'warning',
+        title: 'Invalid Quantity',
+        message: 'Valid quantity enter karo.',
+      });
       return;
     }
+
     const customId = -Date.now();
+
     setCart(prev => {
-      const existing = prev.find(item => item.isCustom && item.name === name && Number(item.price) === price);
+      const existing = prev.find(
+        item => item.isCustom && item.name === name && Number(item.price) === price
+      );
+
       if (existing) {
         return prev.map(item =>
           item.isCustom && item.name === name && Number(item.price) === price
@@ -271,14 +498,31 @@ export default function DineInOrderScreen() {
             : item
         );
       }
-      return [...prev, { productId: customId, name, price, quantity, image: null, isCustom: true }];
+
+      return [
+        ...prev,
+        {
+          productId: customId,
+          name,
+          price,
+          quantity,
+          image: null,
+          isCustom: true,
+        },
+      ];
     });
+
     setCustomName('');
     setCustomPrice('');
     setCustomQuantity('1');
     setCustomModalVisible(false);
-  };
 
+    showDialog({
+      type: 'success',
+      title: 'Custom Item Added',
+      message: `${name} added to order.`,
+    });
+  };
 
   const getRestaurantPrintInfo = async () => {
     const restaurantName = (await AsyncStorage.getItem('restaurant_name')) || 'BillPak';
@@ -303,7 +547,11 @@ export default function DineInOrderScreen() {
   const printKOT = async () => {
     if (kotPrintLockRef.current || printing) return;
     if (cart.length === 0) {
-      Alert.alert('Cart Empty', 'Please add items to cart first');
+      showDialog({
+        type: 'warning',
+        title: 'Cart Empty',
+        message: 'Please add items to cart first.',
+      });
       return;
     }
     kotPrintLockRef.current = true;
@@ -351,15 +599,32 @@ export default function DineInOrderScreen() {
       await AsyncStorage.setItem(`table_${tableId}_status`, 'reserved');
       try {
         await api.put(`/restaurant/tables/${tableId}`, { status: 1 });
-      } catch (apiErr) {
+      } catch (apiErr: any) {
         console.warn('API table update failed, local saved:', apiErr);
+
+        showDialog({
+          type: 'warning',
+          title: 'Table Status Warning',
+          message: 'KOT saved locally, but table status API update failed.',
+        });
       }
+
       setCart([]);
       await loadExistingOrders();
-      Alert.alert('✅ Success', `KOT printed! Table ${tableNumber} is now reserved`);
+
+      showDialog({
+        type: 'success',
+        title: 'KOT Printed',
+        message: `KOT printed. Table ${tableNumber} is now reserved.`,
+      });
     } catch (err: any) {
-      console.error('KOT error:', err);
-      Alert.alert('Error', err.message || 'Failed to print KOT');
+      console.error('KOT error:', err.response?.data || err.message || err);
+
+      showDialog({
+        type: 'error',
+        title: 'KOT Print Failed',
+        message: getApiErrorMessage(err, err.message || 'Failed to print KOT.'),
+      });
     } finally {
       setTimeout(() => {
         kotPrintLockRef.current = false;
@@ -367,6 +632,103 @@ export default function DineInOrderScreen() {
       }, 1800);
     }
   };
+
+  const getDialogIcon = () => {
+    if (appDialog.type === 'success') return 'checkmark-circle';
+    if (appDialog.type === 'error') return 'alert-circle';
+    if (appDialog.type === 'warning') return 'warning';
+    if (appDialog.type === 'confirm') return 'help-circle';
+    return 'information-circle';
+  };
+
+  const getDialogColor = () => {
+    if (appDialog.type === 'success') return '#16A34A';
+    if (appDialog.type === 'error') return '#DC2626';
+    if (appDialog.type === 'warning') return '#F59E0B';
+    if (appDialog.type === 'confirm') return '#F59E0B';
+    return '#1A5F2B';
+  };
+
+  const renderAppDialog = () => {
+    const isConfirm = appDialog.type === 'confirm';
+    const color = getDialogColor();
+
+    return (
+      <Modal visible={appDialog.visible} transparent animationType="fade" onRequestClose={closeDialog}>
+        <View style={styles.dialogOverlay}>
+          <View style={styles.dialogBox}>
+            <View style={[styles.dialogIconWrap, { backgroundColor: `${color}1A` }]}>
+              <Ionicons name={getDialogIcon() as any} size={42} color={color} />
+            </View>
+
+            <Text style={styles.dialogTitle}>{appDialog.title}</Text>
+            <Text style={styles.dialogMessage}>{appDialog.message}</Text>
+
+            <View style={styles.dialogActions}>
+              {isConfirm && (
+                <TouchableOpacity style={styles.dialogCancelBtn} onPress={closeDialog}>
+                  <Text style={styles.dialogCancelText}>{appDialog.cancelText || 'Cancel'}</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.dialogConfirmBtn,
+                  { backgroundColor: isConfirm ? '#DC2626' : color },
+                ]}
+                onPress={handleDialogConfirm}
+              >
+                <Text style={styles.dialogConfirmText}>{appDialog.confirmText || 'OK'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderInlineQuickBillItem = () => (
+    <View style={styles.quickBillBox}>
+      <Text style={styles.quickBillTitle}>Custom Bill Item</Text>
+
+      <View style={styles.quickBillRow}>
+        <TextInput
+          style={styles.quickBillInput}
+          placeholder="Name optional"
+          placeholderTextColor="#94A3B8"
+          value={quickBillName}
+          onChangeText={updateQuickBillName}
+        />
+
+        <TextInput
+          style={[
+            styles.quickBillInput,
+            styles.quickBillPriceInput,
+            quickBillErrors.price && styles.quickBillInputError,
+          ]}
+          placeholder="Price *"
+          placeholderTextColor="#94A3B8"
+          keyboardType="numeric"
+          value={quickBillPrice}
+          onChangeText={updateQuickBillPrice}
+        />
+      </View>
+
+      {!!quickBillErrors.price && (
+        <View style={styles.inlineErrorRow}>
+          <Ionicons name="alert-circle-outline" size={14} color="#DC2626" />
+          <Text style={styles.inlineErrorText}>{quickBillErrors.price}</Text>
+        </View>
+      )}
+
+      <TouchableOpacity style={styles.quickBillAddBtn} onPress={addInlineCustomItemToCart}>
+        <LinearGradient colors={['#1A5F2B', '#0D3D1C']} style={styles.quickBillAddGradient}>
+          <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
+          <Text style={styles.quickBillAddText}>Add Custom Item</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    </View>
+  );
 
   const filteredProducts = products
     .filter(p => selectedCategory === 'all' || Number(p.categoryId) === Number(selectedCategory))
@@ -445,9 +807,9 @@ export default function DineInOrderScreen() {
               <Ionicons name="close-circle" size={28} color="#94A3B8" />
             </TouchableOpacity>
           </View>
-          <Text style={styles.inputLabel}>Item Name</Text>
-          <TextInput style={styles.input} placeholder="e.g., Extra Raita" placeholderTextColor="#94A3B8" value={customName} onChangeText={setCustomName} />
-          <Text style={styles.inputLabel}>Price (₨)</Text>
+          <Text style={styles.inputLabel}>Item Name - Optional</Text>
+          <TextInput style={styles.input} placeholder="Blank name will show as -" placeholderTextColor="#94A3B8" value={customName} onChangeText={setCustomName} />
+          <Text style={styles.inputLabel}>Price (₨) *</Text>
           <TextInput style={styles.input} placeholder="100" placeholderTextColor="#94A3B8" keyboardType="numeric" value={customPrice} onChangeText={setCustomPrice} />
           <Text style={styles.inputLabel}>Quantity</Text>
           <TextInput style={styles.input} placeholder="1" placeholderTextColor="#94A3B8" keyboardType="numeric" value={customQuantity} onChangeText={setCustomQuantity} />
@@ -464,10 +826,16 @@ export default function DineInOrderScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#F5A623" />
-        <Text style={{ marginTop: 10, color: '#6B7280' }}>Loading menu...</Text>
-      </View>
+      <>
+        <StatusBar style="light" />
+
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#F5A623" />
+          <Text style={{ marginTop: 10, color: '#6B7280' }}>Loading menu...</Text>
+        </View>
+
+        {renderAppDialog()}
+      </>
     );
   }
 
@@ -479,7 +847,7 @@ export default function DineInOrderScreen() {
         <View style={styles.container}>
           {/* Header */}
           <LinearGradient colors={['#1A5F2B', '#0D3D1C']} style={styles.header}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
               <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
             <View style={styles.headerCenter}>
@@ -583,22 +951,33 @@ export default function DineInOrderScreen() {
               </ScrollView>
               {cart.length > 0 && (
                 <View style={styles.rightColumnFooter}>
+                  {renderInlineQuickBillItem()}
+
+                  <TouchableOpacity
+                    style={[
+                      styles.printKotFullWidthBtn,
+                      (printing || kotPrintLockRef.current) && { opacity: 0.7 },
+                    ]}
+                    onPress={printKOT}
+                    disabled={printing || kotPrintLockRef.current}
+                  >
+                    <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.printKotFullWidthGradient}>
+                      <Ionicons name="print-outline" size={22} color="#FFFFFF" />
+                      <Text style={styles.printKotFullWidthText}>{printing ? 'Printing...' : 'Print KOT'}</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+
                   <View style={styles.totalRow}>
                     <Text style={styles.totalLabel}>Total Amount</Text>
                     <Text style={styles.totalAmount}>₨{cartTotal}</Text>
                   </View>
-                  <TouchableOpacity style={styles.printKotFooterBtn} onPress={printKOT} disabled={printing || kotPrintLockRef.current}>
-                    <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.printKotFooterGradient}>
-                      <Ionicons name="print-outline" size={20} color="#FFFFFF" />
-                      <Text style={styles.printKotFooterText}>{printing ? 'Printing...' : 'Print KOT'}</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
                 </View>
               )}
             </View>
           </View>
         </View>
         {renderCustomItemModal()}
+        {renderAppDialog()}
       </>
     );
   }
@@ -609,7 +988,7 @@ export default function DineInOrderScreen() {
       <StatusBar style="light" />
       <View style={styles.container}>
         <LinearGradient colors={['#1A5F2B', '#0D3D1C']} style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
@@ -651,22 +1030,33 @@ export default function DineInOrderScreen() {
                     </View>
                   </View>
                 ))}
+                {renderInlineQuickBillItem()}
+
+                <TouchableOpacity
+                  style={[
+                    styles.printKotFullWidthBtn,
+                    (printing || kotPrintLockRef.current) && { opacity: 0.7 },
+                  ]}
+                  onPress={printKOT}
+                  disabled={printing || kotPrintLockRef.current}
+                >
+                  <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.printKotFullWidthGradient}>
+                    <Ionicons name="print-outline" size={22} color="#FFFFFF" />
+                    <Text style={styles.printKotFullWidthText}>{printing ? 'Printing...' : 'Print KOT'}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
                 <View style={styles.mobileTotalRow}>
                   <Text style={styles.mobileTotalLabel}>Total</Text>
                   <Text style={styles.mobileTotalAmount}>₨{cartTotal}</Text>
                 </View>
-                <TouchableOpacity style={styles.mobilePrintBtn} onPress={printKOT} disabled={printing || kotPrintLockRef.current}>
-                  <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.mobilePrintGradient}>
-                    <Ionicons name="print-outline" size={18} color="#FFF" />
-                    <Text style={styles.mobilePrintText}>{printing ? 'Printing...' : 'Print KOT'}</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
               </LinearGradient>
             </View>
           )}
         </View>
       </View>
       {renderCustomItemModal()}
+      {renderAppDialog()}
     </>
   );
 }
@@ -767,6 +1157,162 @@ const styles = StyleSheet.create({
   mobilePrintBtn: { borderRadius: 40, overflow: 'hidden', marginTop: 12 },
   mobilePrintGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 8 },
   mobilePrintText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+
+  quickBillBox: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
+    padding: 10,
+    marginBottom: 12,
+  },
+  quickBillTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 8,
+  },
+  quickBillRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  quickBillInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    fontSize: 12,
+    color: '#0F172A',
+    backgroundColor: '#FFFFFF',
+  },
+  quickBillPriceInput: {
+    maxWidth: 100,
+  },
+  quickBillInputError: {
+    borderColor: '#DC2626',
+    backgroundColor: '#FEF2F2',
+  },
+  inlineErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 6,
+  },
+  inlineErrorText: {
+    color: '#DC2626',
+    fontSize: 11,
+    fontWeight: '700',
+    flex: 1,
+  },
+  quickBillAddBtn: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 9,
+  },
+  quickBillAddGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    gap: 6,
+  },
+  quickBillAddText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 12,
+  },
+  printKotFullWidthBtn: {
+    width: '100%',
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  printKotFullWidthGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 15,
+    gap: 8,
+  },
+  printKotFullWidthText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  dialogOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  dialogBox: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 22,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 18,
+  },
+  dialogIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  dialogTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  dialogMessage: {
+    fontSize: 14,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+  dialogActions: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 10,
+    marginTop: 20,
+  },
+  dialogCancelBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+  },
+  dialogCancelText: {
+    color: '#64748B',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  dialogConfirmBtn: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogConfirmText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
 
   // MODAL
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },

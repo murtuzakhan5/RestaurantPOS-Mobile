@@ -41,7 +41,6 @@ export default function TableBillScreen() {
   const [items, setItems] = useState<BillItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [printing, setPrinting] = useState(false);
-  const [confirmVisible, setConfirmVisible] = useState(false);
   const [cashierName, setCashierName] = useState('Cashier');
   const [cashierId, setCashierId] = useState<number | null>(null);
 
@@ -546,6 +545,7 @@ td { font-size: 13px; padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
     // ✅ Prevent double click / repeated print / duplicate order creation
     if (printLockRef.current || printing) {
       console.log('Print already running, duplicate blocked');
+      Alert.alert('Printing', 'Final bill print already in progress. Please wait.');
       return;
     }
 
@@ -556,8 +556,6 @@ td { font-size: 13px; padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
 
     printLockRef.current = true;
     setPrinting(true);
-    setConfirmVisible(false);
-
     try {
       const backendOrderResponse = await createBackendOrderForInventory();
 
@@ -838,14 +836,14 @@ td { font-size: 13px; padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
 
                 <TouchableOpacity
                   style={[styles.printBtn, printing && styles.printBtnDisabled]}
-                  onPress={() => setConfirmVisible(true)}
+                  onPress={handlePrintFinalBill}
                   disabled={printing || printLockRef.current}
                   activeOpacity={0.8}
                 >
                   <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.printGradient}>
                     <Ionicons name="print-outline" size={22} color="#FFFFFF" />
                     <Text style={styles.printBtnText}>
-                      {printing ? 'Printing...' : 'Print Final Bill'}
+                      {printing ? 'Printing...' : 'View / Print Final Bill'}
                     </Text>
                   </LinearGradient>
                 </TouchableOpacity>
@@ -855,60 +853,7 @@ td { font-size: 13px; padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
         )}
       </View>
 
-      <Modal
-        visible={confirmVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setConfirmVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <LinearGradient colors={['#FFFFFF', '#F8FAFC']} style={styles.confirmBox}>
-            <View style={styles.confirmIcon}>
-              <Ionicons name="receipt-outline" size={50} color="#F5A623" />
-            </View>
-
-            <Text style={styles.confirmTitle}>Confirm Bill</Text>
-
-            <Text style={styles.confirmText}>Subtotal</Text>
-            <Text style={styles.confirmSmallAmount}>₨ {subtotal.toFixed(2)}</Text>
-
-            {discountAmount > 0 && (
-              <>
-                <Text style={styles.confirmText}>Discount</Text>
-                <Text style={styles.confirmDiscount}>- ₨ {discountAmount.toFixed(2)}</Text>
-              </>
-            )}
-
-            <Text style={styles.confirmText}>Total Amount</Text>
-            <Text style={styles.confirmAmount}>₨ {total.toFixed(2)}</Text>
-
-            <Text style={styles.confirmSub}>
-              Cashier: {cashierName} • After printing, table will be cleared and marked as available.
-            </Text>
-
-            <TouchableOpacity
-              style={[styles.confirmPrintBtn, printing && styles.confirmPrintBtnDisabled]}
-              onPress={handlePrintFinalBill}
-              disabled={printing || printLockRef.current}
-            >
-              <LinearGradient colors={['#F5A623', '#D48A1A']} style={styles.confirmPrintGradient}>
-                <Ionicons name="print-outline" size={20} color="#FFFFFF" />
-                <Text style={styles.confirmPrintText}>
-                  {printing ? 'Printing...' : 'Print & Complete'}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.cancelBtn}
-              onPress={() => setConfirmVisible(false)}
-              disabled={printing}
-            >
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </LinearGradient>
-        </View>
-      </Modal>
+      {/* Direct final-bill print is handled by the main button. Confirmation modal removed. */}
     </>
   );
 }

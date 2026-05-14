@@ -33,10 +33,10 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "c7a5a93c-122e-43ed-84f5-3713163e26aa"
+        "projectId": "5b678a94-12cf-45e5-8fc4-3d4353565baa"
       }
     },
-    "owner": "murtuzakhan12"
+    "owner": "amscrafters"
   },
   "web": {
     "output": "static",
