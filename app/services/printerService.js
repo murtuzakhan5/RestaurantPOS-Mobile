@@ -1,6 +1,3 @@
-import React, { forwardRef } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
-import ViewShot from 'react-native-view-shot';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 let UsbPrinterModule = null;
@@ -12,8 +9,7 @@ const loadUsbPrinterModule = () => {
     const imported = require('react-native-printer-usb');
     UsbPrinterModule = imported?.default || imported;
     return UsbPrinterModule;
-  } catch (err) {
-    console.log('USB printer module load failed:', err);
+  } catch {
     throw new Error(
       'USB printer native module not found. Install react-native-printer-usb and rebuild APK with EAS.'
     );
@@ -21,6 +17,7 @@ const loadUsbPrinterModule = () => {
 };
 
 const PRINTER_SETTINGS_KEY = 'billpak_printer_settings';
+const ONLINE_DELIVERY_PHONE_KEY = 'online_delivery_phone';
 
 const defaultPrinterSettings = {
   enabled: false,
@@ -46,7 +43,7 @@ export const getPrinterSettings = async () => {
   }
 };
 
-export const savePrinterSettings = async (settings = {}) => {
+export const savePrinterSettings = async (settings) => {
   const finalSettings = {
     ...defaultPrinterSettings,
     ...settings,
@@ -62,22 +59,25 @@ export const clearPrinterSettings = async () => {
   await AsyncStorage.removeItem(PRINTER_SETTINGS_KEY);
 };
 
-const getReceiptWidth = (paperWidth = 80) => (Number(paperWidth) === 58 ? 32 : 42);
-const getImageWidthPx = (paperWidth = 80) => (Number(paperWidth) === 58 ? 280 : 384);
+const getReceiptWidth = (paperWidth = 80) => {
+  return Number(paperWidth) === 58 ? 32 : 42;
+};
 
 const money = (amount) => Number(amount || 0).toFixed(2);
 
-const safeText = (value = '') =>
-  String(value ?? '')
+const safeText = (value = '') => {
+  return String(value ?? '')
     .replace(/\r/g, '')
     .replace(/[^\S\n]+/g, ' ')
     .trim();
+};
 
-const asciiText = (value = '') =>
-  String(value ?? '')
+const asciiText = (value = '') => {
+  return String(value ?? '')
     .replace(/[^\x20-\x7E\n]/g, '')
     .replace(/[^\S\n]+/g, ' ')
     .trim();
+};
 
 const separator = (width = 42, char = '-') => char.repeat(width);
 
@@ -122,82 +122,20 @@ const wrapText = (text, width = 42) => {
   return lines.length ? lines : [''];
 };
 
-const centeredWrappedText = (text, width = 42) =>
-  wrapText(text, width).map((lineText) => center(lineText, width)).join('\n');
-
-const normalizeBase64Image = (image) => {
-  if (!image) return null;
-  if (typeof image !== 'string') return null;
-
-  const value = image.trim();
-  if (!value) return null;
-
-  if (value.startsWith('data:image')) {
-    const parts = value.split(',');
-    return parts.length > 1 ? parts[1] : null;
-  }
-
-  if (value.startsWith('file://')) {
-    console.log('Logo/image is file path. Convert to base64 before printing:', value);
-    return null;
-  }
-
-  if (/^https?:\/\//i.test(value)) {
-    console.log('Logo/image is URL. Convert to base64 before printing:', value);
-    return null;
-  }
-
-  if (value.length > 100) return value;
-
-  return null;
+const centeredWrappedText = (text, width = 42) => {
+  return wrapText(text, width).map((lineText) => center(lineText, width)).join('\n');
 };
 
-const normalizeLogoUri = (logo) => {
-  if (!logo || typeof logo !== 'string') return null;
-
-  const value = logo.trim();
-
-  if (value.startsWith('data:image')) return value;
-  if (/^https?:\/\//i.test(value)) return value;
-  if (value.startsWith('file://')) return value;
-  if (value.length > 100) return `data:image/png;base64,${value}`;
-
+const normalizeBase64Logo = (logo) => {
+  if (!logo) return null;
+  if (typeof logo !== 'string') return null;
+  if (logo.startsWith('data:image')) return logo.split(',')[1] || null;
+  if (logo.length > 100) return logo;
   return null;
-};
-
-const getUrduName = (item = {}) =>
-  safeText(
-    item?.nameUrdu ||
-      item?.urduName ||
-      item?.name_urdu ||
-      item?.productNameUrdu ||
-      item?.product_name_urdu ||
-      item?.product?.nameUrdu ||
-      item?.product?.urduName ||
-      item?.product?.name_urdu ||
-      ''
-  );
-
-const getItemName = (item = {}) =>
-  safeText(item?.name || item?.productName || item?.product?.name || 'Item');
-
-const getQty = (item = {}) => Number(item?.quantity || item?.qty || 0);
-const getPrice = (item = {}) => Number(item?.price || item?.salePrice || item?.rate || 0);
-
-const addUrduLine = (receipt, text) => {
-  const value = safeText(text);
-  if (!value) return receipt;
-  return `${receipt}${value}\n`;
 };
 
 export const listUsbPrinters = async () => {
-  const module = loadUsbPrinterModule();
-  const getList = module.getList || module.listPrinters || module.getPrinters;
-
-  if (typeof getList !== 'function') {
-    throw new Error('USB printer module does not expose getList/listPrinters/getPrinters.');
-  }
-
+  const { getList } = loadUsbPrinterModule();
   const devices = await Promise.resolve(getList());
   return Array.isArray(devices) ? devices : [];
 };
@@ -235,13 +173,11 @@ const getWorkingSettings = async () => {
 };
 
 const sendTextToUsbPrinter = async (text, options = {}) => {
-  const module = loadUsbPrinterModule();
-  const printText = module.printText || module.printRawText || module.print;
-
+  const { printText } = loadUsbPrinterModule();
   const settings = await getWorkingSettings();
 
-  if (typeof printText !== 'function') {
-    throw new Error('printText()/printRawText()/print() not found in USB printer module.');
+  if (!printText) {
+    throw new Error('printText() not found in USB printer module.');
   }
 
   if (!settings.productId) {
@@ -251,8 +187,6 @@ const sendTextToUsbPrinter = async (text, options = {}) => {
   return printText({
     text,
     productId: settings.productId,
-    vendorId: settings.vendorId,
-    deviceId: settings.deviceId,
     align: options.align || 'left',
     encoding: options.encoding || settings.encoding || 'UTF-8',
     bold: Boolean(options.bold),
@@ -265,15 +199,88 @@ const sendTextToUsbPrinter = async (text, options = {}) => {
   });
 };
 
-export const printBase64ImageToUsbPrinter = async (base64Image, options = {}) => {
+const tryPrintLogo = async (restaurantLogo) => {
+  // Stable client-delivery mode:
+  // Logo/image printing is intentionally skipped because this USB printer setup
+  // prints blank/slow output when image/raster printing is used.
+  // Text KOT + text invoice remain fast and reliable.
+  return false;
+};
+
+const getUrduName = (item = {}) =>
+  safeText(
+    item?.nameUrdu ||
+      item?.urduName ||
+      item?.name_urdu ||
+      item?.productNameUrdu ||
+      item?.product_name_urdu ||
+      item?.product?.nameUrdu ||
+      item?.product?.urduName ||
+      item?.product?.name_urdu ||
+      ''
+  );
+
+const addUrduLine = (receipt, text) => {
+  // Raw Urdu text is intentionally disabled in APK text mode because it prints garbage on many ESC/POS printers.
+  // Urdu is printed through small captured image lines when nameUrduImageBase64 is available.
+  return receipt;
+};
+
+const getOnlineDeliveryPhoneForPrint = async () => {
+  try {
+    const saved =
+      (await AsyncStorage.getItem(ONLINE_DELIVERY_PHONE_KEY)) ||
+      (await AsyncStorage.getItem('restaurant_online_delivery_phone')) ||
+      '';
+    return safeText(saved);
+  } catch {
+    return '';
+  }
+};
+
+const addOnlineDeliveryFooter = (receipt, width, onlineDeliveryPhone = '') => {
+  const phone = safeText(onlineDeliveryPhone);
+  if (!phone) return receipt;
+
+  receipt += `${center('ONLINE DELIVERY', width)}\n`;
+  receipt += `${center(phone, width)}\n`;
+  return receipt;
+};
+
+const URDU_IMAGE_START = '__BILLPAK_URDU_IMAGE_START__';
+const URDU_IMAGE_END = '__BILLPAK_URDU_IMAGE_END__';
+
+const normalizeBase64Image = (image) => {
+  if (!image || typeof image !== 'string') return null;
+
+  const value = image.trim();
+  if (!value) return null;
+
+  if (value.startsWith('data:image')) {
+    const parts = value.split(',');
+    return parts.length > 1 ? parts[1] : null;
+  }
+
+  if (value.startsWith('file://') || /^https?:\/\//i.test(value)) {
+    return null;
+  }
+
+  return value.length > 100 ? value : null;
+};
+
+const addUrduImageLine = (receipt, imageBase64) => {
+  const cleanImage = normalizeBase64Image(imageBase64);
+  if (!cleanImage) return receipt;
+
+  return `${receipt}${URDU_IMAGE_START}${cleanImage}${URDU_IMAGE_END}\n`;
+};
+
+const printBase64ImageToUsbPrinter = async (base64Image, options = {}) => {
   const module = loadUsbPrinterModule();
   const settings = await getWorkingSettings();
-
   const cleanBase64 = normalizeBase64Image(base64Image);
 
-  if (!cleanBase64) {
-    throw new Error('Image base64 missing/invalid. Pass raw base64 or data:image/png;base64,...');
-  }
+  if (!cleanBase64) return false;
 
   const imageFn =
     module.printImageBase64 ||
@@ -282,67 +289,119 @@ export const printBase64ImageToUsbPrinter = async (base64Image, options = {}) =>
     module.printPic ||
     module.printRasterImage;
 
-  console.log('USB printer module keys:', Object.keys(module || {}));
-  console.log('USB image function found:', typeof imageFn === 'function');
-
   if (typeof imageFn !== 'function') {
-    throw new Error(
-      'This USB printer module does not expose image printing. Need printImageBase64/printImage/printBitmap support.'
-    );
+    console.log('USB printer module image function not found. Urdu image skipped.');
+    return false;
   }
 
   const payload = {
+    base64Image: cleanBase64,
     image: cleanBase64,
     data: cleanBase64,
     base64: cleanBase64,
     productId: settings.productId,
     vendorId: settings.vendorId,
     deviceId: settings.deviceId,
-    width: options.width || getImageWidthPx(settings.paperWidth),
-    height: options.height,
     align: options.align || 'center',
-    cut: options.cut ?? false,
-    beep: options.beep ?? false,
-    tailingLine: options.tailingLine ?? true,
+    width: options.width || getImageWidthPx(settings.paperWidth || 80),
+    cut: false,
+    beep: false,
+    tailingLine: true,
   };
 
   try {
-    return await imageFn(payload);
+    await imageFn(payload);
+    return true;
   } catch (err) {
-    console.log('USB image print failed with object payload:', err);
+    console.log('USB Urdu image print failed with object payload:', err?.message || err);
+  }
 
-    try {
-      return await imageFn(cleanBase64, settings.productId);
-    } catch (err2) {
-      console.log('USB image print failed with fallback payload:', err2);
-      throw err2;
-    }
+  try {
+    await imageFn(cleanBase64, settings.productId);
+    return true;
+  } catch (err) {
+    console.log('USB Urdu image print failed with fallback payload:', err?.message || err);
+    return false;
   }
 };
 
-const tryPrintLogo = async (restaurantLogo) => {
-  const base64Logo = normalizeBase64Image(restaurantLogo);
+const splitReceiptByUrduImages = (receiptText = '') => {
+  const value = String(receiptText || '');
+  const parts = [];
+  const regex = new RegExp(`${URDU_IMAGE_START}([\\s\\S]*?)${URDU_IMAGE_END}`, 'g');
 
-  console.log('Restaurant logo received:', Boolean(restaurantLogo));
-  console.log('Restaurant logo valid base64:', Boolean(base64Logo));
+  let lastIndex = 0;
+  let match = null;
 
-  if (!base64Logo) return false;
+  while ((match = regex.exec(value)) !== null) {
+    const before = value.slice(lastIndex, match.index);
+    if (before) {
+      parts.push({ type: 'text', text: before });
+    }
 
-  try {
-    await printBase64ImageToUsbPrinter(base64Logo, {
-      width: 160,
-      align: 'center',
-      cut: false,
-      beep: false,
-      tailingLine: true,
-    });
+    if (match[1]) {
+      parts.push({ type: 'image', base64: match[1] });
+    }
 
-    await sendTextToUsbPrinter('\n', { cut: false, beep: false });
-    return true;
-  } catch (err) {
-    console.log('Logo print failed:', err);
-    return false;
+    lastIndex = regex.lastIndex;
   }
+
+  const after = value.slice(lastIndex);
+  if (after) {
+    parts.push({ type: 'text', text: after });
+  }
+
+  return parts;
+};
+
+const sendReceiptToUsbPrinter = async (receiptText, options = {}) => {
+  const parts = splitReceiptByUrduImages(receiptText);
+
+  if (!parts.some(part => part.type === 'image')) {
+    return sendTextToUsbPrinter(receiptText, options);
+  }
+
+  let printedText = false;
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    const isLast = index === parts.length - 1;
+
+    if (part.type === 'text') {
+      if (!part.text) continue;
+
+      await sendTextToUsbPrinter(part.text, {
+        ...options,
+        cut: isLast ? options.cut : false,
+        beep: isLast ? options.beep : false,
+        tailingLine: isLast ? options.tailingLine : false,
+      });
+
+      printedText = true;
+      continue;
+    }
+
+    if (part.type === 'image') {
+      // Urdu image failure should not break full bill printing.
+      await printBase64ImageToUsbPrinter(part.base64, {
+        width: options.urduImageWidth,
+        align: 'center',
+      });
+    }
+  }
+
+  const lastPart = parts[parts.length - 1];
+
+  if (lastPart?.type === 'image' || !printedText) {
+    await sendTextToUsbPrinter('\n', {
+      ...options,
+      cut: options.cut,
+      beep: options.beep,
+      tailingLine: options.tailingLine,
+    });
+  }
+
+  return true;
 };
 
 export const buildKotText = ({
@@ -353,6 +412,7 @@ export const buildKotText = ({
   categoryName,
   items,
   paperWidth = 80,
+  onlineDeliveryPhone = '',
 }) => {
   const width = getReceiptWidth(paperWidth);
   const now = new Date().toLocaleString('en-PK');
@@ -372,19 +432,24 @@ export const buildKotText = ({
   receipt += `${separator(width)}\n`;
 
   (items || []).forEach((item) => {
-    const itemName = getItemName(item);
-    const qty = getQty(item);
-    const urduName = getUrduName(item);
+    const itemName = item?.name || 'Item';
+    const qty = Number(item?.quantity || 0);
 
     receipt += `${line(itemName, `x${qty}`, width)}\n`;
 
-    if (urduName) {
+    const urduName = getUrduName(item);
+    if (item?.nameUrduImageBase64) {
+      receipt = addUrduImageLine(receipt, item.nameUrduImageBase64);
+    } else if (urduName) {
       receipt = addUrduLine(receipt, urduName);
     }
   });
 
   receipt += `${separator(width)}\n`;
   receipt += `${centeredWrappedText(`Kitchen Copy - ${categoryName || 'Kitchen'}`, width)}\n`;
+  receipt += `${separator(width)}\n`;
+  receipt = addOnlineDeliveryFooter(receipt, width, onlineDeliveryPhone);
+  receipt += `${center('Powered by AMS Crafters', width)}\n`;
   receipt += '\n\n\n';
 
   return receipt;
@@ -404,6 +469,7 @@ export const buildInvoiceText = ({
   total,
   paperWidth = 80,
   orderType = 'Takeaway',
+  onlineDeliveryPhone = '',
 }) => {
   const width = getReceiptWidth(paperWidth);
   const now = new Date().toLocaleString('en-PK');
@@ -438,18 +504,20 @@ export const buildInvoiceText = ({
   receipt += `${separator(width)}\n`;
 
   (cart || []).forEach((item) => {
-    const itemName = getItemName(item);
-    const qty = getQty(item);
-    const price = getPrice(item);
+    const itemName = item?.name || 'Item';
+    const qty = Number(item?.quantity || 0);
+    const price = Number(item?.price || 0);
     const itemTotal = qty * price;
-    const urduName = getUrduName(item);
 
     const itemLines = wrapText(`${itemName}${item?.isCustom ? ' *' : ''}`, width);
     itemLines.forEach((itemLine) => {
       receipt += `${itemLine}\n`;
     });
 
-    if (urduName) {
+    const urduName = getUrduName(item);
+    if (item?.nameUrduImageBase64) {
+      receipt = addUrduImageLine(receipt, item.nameUrduImageBase64);
+    } else if (urduName) {
       receipt = addUrduLine(receipt, urduName);
     }
 
@@ -475,34 +543,12 @@ export const buildInvoiceText = ({
   receipt += '\n';
   receipt += `${separator(width)}\n`;
   receipt += `${center('Thank you!', width)}\n`;
+  receipt = addOnlineDeliveryFooter(receipt, width, onlineDeliveryPhone);
   receipt += `${center('Powered by AMS Crafters', width)}\n`;
   receipt += `${separator(width)}\n`;
   receipt += '\n\n\n';
 
   return receipt;
-};
-
-export const printImageReceiptDirect = async ({
-  receiptImageBase64,
-  cut = true,
-  beep = true,
-  width,
-}) => {
-  await printBase64ImageToUsbPrinter(receiptImageBase64, {
-    width,
-    align: 'center',
-    cut: false,
-    beep: false,
-    tailingLine: true,
-  });
-
-  await sendTextToUsbPrinter('\n\n\n', {
-    cut,
-    beep,
-    tailingLine: true,
-  });
-
-  return true;
 };
 
 export const printKotThenInvoiceDirect = async ({
@@ -519,8 +565,6 @@ export const printKotThenInvoiceDirect = async ({
   discountType,
   discountValue,
   total,
-  invoiceImageBase64,
-  kotImageBase64ByCategory,
 }) => {
   const settings = await getWorkingSettings();
 
@@ -530,6 +574,7 @@ export const printKotThenInvoiceDirect = async ({
 
   const paperWidth = settings.paperWidth || 80;
   const autoCut = settings.autoCut !== false;
+  const onlineDeliveryPhone = await getOnlineDeliveryPhoneForPrint();
 
   const groups = Object.entries(groupedCart || {});
 
@@ -538,18 +583,6 @@ export const printKotThenInvoiceDirect = async ({
   }
 
   for (const [categoryName, items] of groups) {
-    const kotImage = kotImageBase64ByCategory?.[categoryName];
-
-    if (kotImage) {
-      await printImageReceiptDirect({
-        receiptImageBase64: kotImage,
-        cut: autoCut,
-        beep: false,
-        width: getImageWidthPx(paperWidth),
-      });
-      continue;
-    }
-
     const kotText = buildKotText({
       restaurantName,
       billNo,
@@ -558,23 +591,14 @@ export const printKotThenInvoiceDirect = async ({
       categoryName,
       items,
       paperWidth,
+      onlineDeliveryPhone,
     });
 
-    await sendTextToUsbPrinter(kotText, {
+    await sendReceiptToUsbPrinter(kotText, {
       cut: autoCut,
       beep: false,
       tailingLine: true,
     });
-  }
-
-  if (invoiceImageBase64) {
-    await printImageReceiptDirect({
-      receiptImageBase64: invoiceImageBase64,
-      cut: autoCut,
-      beep: true,
-      width: getImageWidthPx(paperWidth),
-    });
-    return true;
   }
 
   await tryPrintLogo(restaurantLogo);
@@ -593,9 +617,10 @@ export const printKotThenInvoiceDirect = async ({
     total,
     paperWidth,
     orderType: 'Takeaway',
+    onlineDeliveryPhone,
   });
 
-  await sendTextToUsbPrinter(invoiceText, {
+  await sendReceiptToUsbPrinter(invoiceText, {
     cut: autoCut,
     beep: true,
     tailingLine: true,
@@ -611,6 +636,7 @@ export const buildDineInKotText = ({
   cashierName,
   items,
   paperWidth = 80,
+  onlineDeliveryPhone = '',
 }) => {
   const width = getReceiptWidth(paperWidth);
   const now = new Date().toLocaleString('en-PK');
@@ -628,19 +654,21 @@ export const buildDineInKotText = ({
   receipt += `${separator(width)}\n`;
 
   (items || []).forEach((item) => {
-    const itemName = getItemName(item);
-    const qty = getQty(item);
+    receipt += `${line(item?.name || 'Item', `x${Number(item?.quantity || 0)}`, width)}\n`;
+
     const urduName = getUrduName(item);
-
-    receipt += `${line(itemName, `x${qty}`, width)}\n`;
-
-    if (urduName) {
+    if (item?.nameUrduImageBase64) {
+      receipt = addUrduImageLine(receipt, item.nameUrduImageBase64);
+    } else if (urduName) {
       receipt = addUrduLine(receipt, urduName);
     }
   });
 
   receipt += `${separator(width)}\n`;
   receipt += `${center('Kitchen Copy', width)}\n`;
+  receipt += `${separator(width)}\n`;
+  receipt = addOnlineDeliveryFooter(receipt, width, onlineDeliveryPhone);
+  receipt += `${center('Powered by AMS Crafters', width)}\n`;
   receipt += '\n\n\n\n\n';
 
   return receipt;
@@ -652,7 +680,6 @@ export const printDineInKotDirect = async ({
   tableNumber,
   cashierName,
   items,
-  kotImageBase64,
 }) => {
   const settings = await getWorkingSettings();
 
@@ -660,14 +687,7 @@ export const printDineInKotDirect = async ({
     throw new Error('Direct USB printer is disabled.');
   }
 
-  if (kotImageBase64) {
-    return printImageReceiptDirect({
-      receiptImageBase64: kotImageBase64,
-      cut: settings.autoCut !== false,
-      beep: false,
-      width: getImageWidthPx(settings.paperWidth || 80),
-    });
-  }
+  const onlineDeliveryPhone = await getOnlineDeliveryPhoneForPrint();
 
   const kotText = buildDineInKotText({
     restaurantName,
@@ -676,9 +696,10 @@ export const printDineInKotDirect = async ({
     cashierName,
     items,
     paperWidth: settings.paperWidth || 80,
+    onlineDeliveryPhone,
   });
 
-  await sendTextToUsbPrinter(kotText, {
+  await sendReceiptToUsbPrinter(kotText, {
     cut: settings.autoCut !== false,
     beep: false,
     tailingLine: true,
@@ -700,7 +721,6 @@ export const printDineInInvoiceDirect = async ({
   discountType,
   discountValue,
   total,
-  invoiceImageBase64,
 }) => {
   const settings = await getWorkingSettings();
 
@@ -708,16 +728,8 @@ export const printDineInInvoiceDirect = async ({
     throw new Error('Direct USB printer is disabled.');
   }
 
-  if (invoiceImageBase64) {
-    return printImageReceiptDirect({
-      receiptImageBase64: invoiceImageBase64,
-      cut: settings.autoCut !== false,
-      beep: true,
-      width: getImageWidthPx(settings.paperWidth || 80),
-    });
-  }
-
   await tryPrintLogo(restaurantLogo);
+  const onlineDeliveryPhone = await getOnlineDeliveryPhoneForPrint();
 
   const invoiceText = buildInvoiceText({
     restaurantName,
@@ -733,9 +745,10 @@ export const printDineInInvoiceDirect = async ({
     total,
     paperWidth: settings.paperWidth || 80,
     orderType: 'Dine-In',
+    onlineDeliveryPhone,
   });
 
-  await sendTextToUsbPrinter(invoiceText, {
+  await sendReceiptToUsbPrinter(invoiceText, {
     cut: settings.autoCut !== false,
     beep: true,
     tailingLine: true,
@@ -748,8 +761,6 @@ export const testUsbPrinter = async () => {
   const settings = await getWorkingSettings();
   const width = getReceiptWidth(settings.paperWidth);
 
-  console.log('USB test settings:', settings);
-
   const testText =
     `${center('BillPak Printer Test', width)}\n` +
     `${separator(width)}\n` +
@@ -758,7 +769,7 @@ export const testUsbPrinter = async () => {
     `Vendor ID: ${settings.vendorId || 'N/A'}\n` +
     `Time: ${new Date().toLocaleString('en-PK')}\n` +
     `${separator(width)}\n` +
-    `Urdu Raw Text Test Below:\n` +
+    `Urdu Test Below:\n` +
     `اردو ٹیسٹ\n` +
     `${separator(width)}\n` +
     `${center('Test successful', width)}\n` +
@@ -773,362 +784,3 @@ export const testUsbPrinter = async () => {
 
   return true;
 };
-
-export const __debugUsbPrinterModule = () => {
-  const module = loadUsbPrinterModule();
-  console.log('USB printer module keys:', Object.keys(module || {}));
-  return Object.keys(module || {});
-};
-
-/* ============================================================
-   HIDDEN RECEIPT CAPTURE COMPONENTS
-   Use these in your print screen to create image receipt.
-   This is required for reliable Urdu/logo printing.
-============================================================ */
-
-const Row = ({ left, right, bold = false, large = false }) => (
-  <View style={styles.row}>
-    <Text
-      style={[
-        styles.text,
-        bold && styles.bold,
-        large && styles.largeText,
-        { flex: 1, textAlign: 'left' },
-      ]}
-    >
-      {safeText(left)}
-    </Text>
-    <Text style={[styles.text, bold && styles.bold, large && styles.largeText, styles.rightText]}>
-      {safeText(right)}
-    </Text>
-  </View>
-);
-
-const Separator = ({ strong = false }) => (
-  <View style={[styles.separatorLine, strong && styles.strongSeparatorLine]} />
-);
-
-const UrduText = ({ children }) => {
-  const value = safeText(children);
-  if (!value) return null;
-
-  return <Text style={styles.urduText}>{value}</Text>;
-};
-
-const ReceiptShell = forwardRef(({ paperWidth = 80, children }, ref) => {
-  const width = getImageWidthPx(paperWidth);
-
-  return (
-    <View pointerEvents="none" style={styles.hiddenWrapper}>
-      <ViewShot
-        ref={ref}
-        options={{ format: 'png', quality: 1, result: 'base64' }}
-        style={[styles.captureArea, { width }]}
-      >
-        <View collapsable={false} style={[styles.paper, { width }]}>
-          {children}
-        </View>
-      </ViewShot>
-    </View>
-  );
-});
-
-export const ThermalInvoiceCapture = forwardRef(
-  (
-    {
-      restaurantName,
-      restaurantAddress,
-      restaurantLogo,
-      billNo,
-      tokenNo,
-      tableNumber,
-      cashierName,
-      cart,
-      items,
-      subtotal,
-      discountAmount,
-      discountType,
-      discountValue,
-      total,
-      paperWidth = 80,
-      orderType = 'Takeaway',
-    },
-    ref
-  ) => {
-    const logoUri = normalizeLogoUri(restaurantLogo);
-    const list = Array.isArray(cart) ? cart : Array.isArray(items) ? items : [];
-    const isDineIn = orderType === 'Dine-In';
-    const now = new Date().toLocaleString('en-PK');
-
-    return (
-      <ReceiptShell ref={ref} paperWidth={paperWidth}>
-        {!!logoUri && <Image source={{ uri: logoUri }} resizeMode="contain" style={styles.logo} />}
-
-        <Text style={styles.restaurantName}>{safeText(restaurantName || 'BillPak')}</Text>
-
-        {!!restaurantAddress && <Text style={styles.address}>{safeText(restaurantAddress)}</Text>}
-
-        <Separator strong />
-
-        <Text style={styles.heading}>{isDineIn ? 'DINE-IN INVOICE' : 'TAKEAWAY INVOICE'}</Text>
-
-        <Separator strong />
-
-        <Text style={styles.tokenText}>
-          {isDineIn ? `TABLE ${tableNumber || tokenNo || ''}` : `TOKEN #${tokenNo}`}
-        </Text>
-
-        <Separator />
-
-        <Row left="Bill No:" right={billNo} />
-        <Row left="Date:" right={now} />
-        <Row left="Cashier:" right={cashierName || 'Cashier'} />
-        <Row left="Payment:" right="Cash" />
-
-        <Separator />
-
-        <Row left="ITEM" right="TOTAL" bold />
-
-        <Separator />
-
-        {list.map((item, index) => {
-          const qty = getQty(item);
-          const price = getPrice(item);
-          const itemTotal = qty * price;
-          const urduName = getUrduName(item);
-
-          return (
-            <View key={`${getItemName(item)}-${index}`} style={styles.itemBlock}>
-              <Text style={styles.itemName}>
-                {getItemName(item)}
-                {item?.isCustom ? ' *' : ''}
-              </Text>
-
-              <UrduText>{urduName}</UrduText>
-
-              <Row left={`  ${qty} x Rs.${money(price)}`} right={`Rs.${money(itemTotal)}`} />
-            </View>
-          );
-        })}
-
-        <Separator />
-
-        <Row left="Subtotal" right={`Rs.${money(subtotal)}`} />
-
-        {Number(discountAmount || 0) > 0 && (
-          <Row
-            left={discountType === 'percentage' ? `Discount (${discountValue}%)` : 'Discount'}
-            right={`-Rs.${money(discountAmount)}`}
-          />
-        )}
-
-        <Separator strong />
-
-        <Row left="TOTAL" right={`Rs.${money(total)}`} bold large />
-
-        <Separator strong />
-
-        <Text style={styles.thankYou}>
-          {isDineIn ? 'Thank you for dining with us!' : 'Thank you for ordering!'}
-        </Text>
-
-        <Text style={styles.powered}>Powered by BillPak</Text>
-
-        <View style={styles.bottomGap} />
-      </ReceiptShell>
-    );
-  }
-);
-
-export const ThermalKotCapture = forwardRef(
-  (
-    {
-      restaurantName,
-      billNo,
-      tokenNo,
-      tableNumber,
-      cashierName,
-      categoryName,
-      items = [],
-      paperWidth = 80,
-      orderType = 'Takeaway',
-    },
-    ref
-  ) => {
-    const isDineIn = orderType === 'Dine-In';
-    const title = isDineIn ? 'DINE-IN KOT' : 'TAKEAWAY KOT';
-    const mainToken = isDineIn ? `TABLE ${tableNumber || ''}` : `TOKEN #${tokenNo}`;
-    const now = new Date().toLocaleString('en-PK');
-
-    return (
-      <ReceiptShell ref={ref} paperWidth={paperWidth}>
-        <Text style={styles.restaurantName}>{safeText(restaurantName || 'BillPak')}</Text>
-        <Text style={styles.heading}>{title}</Text>
-
-        {!!categoryName && (
-          <Text style={styles.centerText}>{String(categoryName).toUpperCase()}</Text>
-        )}
-
-        <Separator strong />
-        <Text style={styles.tokenText}>{mainToken}</Text>
-        <Separator strong />
-
-        <Row left="Bill No" right={billNo} />
-        <Row left="Time" right={now} />
-        <Row left="Cashier" right={cashierName || 'Cashier'} />
-        {!!categoryName && <Row left="Section" right={categoryName} />}
-
-        <Separator />
-
-        {items.map((item, index) => {
-          const urduName = getUrduName(item);
-
-          return (
-            <View key={`${getItemName(item)}-${index}`} style={styles.itemBlock}>
-              <Row left={getItemName(item)} right={`x${getQty(item)}`} bold />
-              <UrduText>{urduName}</UrduText>
-            </View>
-          );
-        })}
-
-        <Separator />
-        <Text style={styles.centerText}>Kitchen Copy{categoryName ? ` - ${categoryName}` : ''}</Text>
-        <View style={styles.bottomGap} />
-      </ReceiptShell>
-    );
-  }
-);
-
-export const captureThermalReceiptBase64 = async (receiptRef) => {
-  if (!receiptRef?.current?.capture) {
-    throw new Error('Receipt ref is missing. Attach ref to ThermalInvoiceCapture/ThermalKotCapture.');
-  }
-
-  return receiptRef.current.capture();
-};
-
-const styles = StyleSheet.create({
-  hiddenWrapper: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    opacity: 0.01,
-    zIndex: -9999,
-  },
-  captureArea: {
-    backgroundColor: '#FFFFFF',
-  },
-  paper: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  logo: {
-    alignSelf: 'center',
-    width: 150,
-    height: 75,
-    marginBottom: 4,
-  },
-  restaurantName: {
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: '800',
-    color: '#000000',
-    textAlign: 'center',
-  },
-  address: {
-    fontSize: 16,
-    lineHeight: 21,
-    color: '#000000',
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  heading: {
-    fontSize: 19,
-    lineHeight: 25,
-    color: '#000000',
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  tokenText: {
-    fontSize: 28,
-    lineHeight: 36,
-    color: '#000000',
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  centerText: {
-    fontSize: 17,
-    lineHeight: 23,
-    color: '#000000',
-    textAlign: 'center',
-    fontWeight: '700',
-  },
-  text: {
-    fontSize: 17,
-    lineHeight: 24,
-    color: '#000000',
-  },
-  rightText: {
-    minWidth: 90,
-    textAlign: 'right',
-  },
-  bold: {
-    fontWeight: '800',
-  },
-  largeText: {
-    fontSize: 23,
-    lineHeight: 30,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-  },
-  separatorLine: {
-    height: 1,
-    backgroundColor: '#000000',
-    marginVertical: 5,
-  },
-  strongSeparatorLine: {
-    height: 2,
-  },
-  itemBlock: {
-    marginBottom: 3,
-  },
-  itemName: {
-    fontSize: 17,
-    lineHeight: 24,
-    color: '#000000',
-    fontWeight: '700',
-    textAlign: 'left',
-  },
-  urduText: {
-    fontSize: 24,
-    lineHeight: 34,
-    color: '#000000',
-    fontWeight: '700',
-    textAlign: 'right',
-    writingDirection: 'rtl',
-    includeFontPadding: false,
-    marginVertical: 1,
-  },
-  thankYou: {
-    fontSize: 18,
-    lineHeight: 24,
-    color: '#000000',
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  powered: {
-    fontSize: 15,
-    lineHeight: 21,
-    color: '#000000',
-    textAlign: 'center',
-  },
-  bottomGap: {
-    height: 45,
-  },
-});

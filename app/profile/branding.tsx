@@ -31,6 +31,7 @@ import {
 } from '../services/webPrinterService';
 
 const LOGO_KEY = 'restaurant_logo';
+const ONLINE_DELIVERY_PHONE_KEY = 'online_delivery_phone';
 
 const showApiError = (
   error: any,
@@ -81,6 +82,7 @@ export default function ProfessionalPOSSettingsScreen() {
     name: '',
     address: '',
     phone: '',
+    onlineDeliveryPhone: '',
     email: '',
     ownerName: '',
     planName: '',
@@ -110,11 +112,16 @@ export default function ProfessionalPOSSettingsScreen() {
       const response = await api.get('/restaurant/profile');
 
       const restaurant = response.data?.restaurant || {};
+      const savedOnlineDeliveryPhone =
+        (await AsyncStorage.getItem(ONLINE_DELIVERY_PHONE_KEY)) ||
+        (await AsyncStorage.getItem('restaurant_online_delivery_phone')) ||
+        '';
 
       setProfile({
         name: restaurant.name || '',
         address: restaurant.address || '',
         phone: restaurant.phone || '',
+        onlineDeliveryPhone: savedOnlineDeliveryPhone || restaurant.onlineDeliveryPhone || '',
         email: restaurant.email || '',
         ownerName: restaurant.ownerName || '',
         planName: restaurant.planName || '',
@@ -148,6 +155,16 @@ export default function ProfessionalPOSSettingsScreen() {
       await AsyncStorage.setItem(
         'restaurant_address',
         profile.address
+      );
+
+      await AsyncStorage.setItem(
+        ONLINE_DELIVERY_PHONE_KEY,
+        profile.onlineDeliveryPhone || ''
+      );
+
+      await AsyncStorage.setItem(
+        'restaurant_online_delivery_phone',
+        profile.onlineDeliveryPhone || ''
       );
 
       Alert.alert(
@@ -437,6 +454,27 @@ export default function ProfessionalPOSSettingsScreen() {
               }
             />
 
+            <Text style={styles.inputLabel}>
+              Online Delivery Number
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 0300-1234567"
+              keyboardType="phone-pad"
+              value={profile.onlineDeliveryPhone}
+              onChangeText={(t) =>
+                setProfile({
+                  ...profile,
+                  onlineDeliveryPhone: t,
+                })
+              }
+            />
+
+            <Text style={styles.helperText}>
+              Ye number invoice/KOT footer mein “ONLINE DELIVERY” ke neeche print hoga.
+            </Text>
+
             <TouchableOpacity
               style={styles.primaryBtn}
               onPress={saveProfile}
@@ -613,6 +651,18 @@ export default function ProfessionalPOSSettingsScreen() {
               {profile.phone}
             </Text>
 
+            {!!profile.onlineDeliveryPhone && (
+              <>
+                <Text style={styles.previewDeliveryTitle}>
+                  ONLINE DELIVERY
+                </Text>
+
+                <Text style={styles.previewDeliveryPhone}>
+                  {profile.onlineDeliveryPhone}
+                </Text>
+              </>
+            )}
+
             <Text style={styles.previewText}>
               Printer:{' '}
               {selectedPrinter ||
@@ -747,6 +797,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
+  inputLabel: {
+    fontSize: 13,
+    color: '#334155',
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+
+  helperText: {
+    color: '#64748B',
+    fontSize: 12,
+    marginTop: -6,
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+
   input: {
     borderWidth: 1,
     borderColor: '#CBD5E1',
@@ -816,5 +881,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#64748B',
     marginTop: 4,
+  },
+
+  previewDeliveryTitle: {
+    textAlign: 'center',
+    color: '#0F172A',
+    fontSize: 16,
+    fontWeight: '900',
+    marginTop: 12,
+  },
+
+  previewDeliveryPhone: {
+    textAlign: 'center',
+    color: '#1A5F2B',
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 3,
   },
 });

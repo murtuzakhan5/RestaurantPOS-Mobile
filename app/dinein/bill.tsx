@@ -27,6 +27,8 @@ type DiscountType = 'none' | 'percentage' | 'fixed';
 interface BillItem {
   productId: number;
   name: string;
+  nameUrdu?: string | null;
+  nameUrduImageBase64?: string | null;
   price: number;
   quantity: number;
   isCustom?: boolean;
@@ -122,6 +124,8 @@ export default function TableBillScreen() {
             merged.push({
               productId,
               name: item.name,
+              nameUrdu: (item as any).nameUrdu || null,
+              nameUrduImageBase64: (item as any).nameUrduImageBase64 || null,
               price,
               quantity,
               isCustom,
