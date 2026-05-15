@@ -827,200 +827,6 @@ const createPrinterConfig = (printerName) => {
   });
 };
 
-
-const isTabletBrowser = () => {
-  if (typeof navigator === 'undefined') return false;
-  const ua = navigator.userAgent || '';
-  return /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(ua) || Number(navigator.maxTouchPoints || 0) > 1;
-};
-
-const getOnlineDeliveryPhoneForWeb = () => {
-  try {
-    return (
-      localStorage.getItem('online_delivery_phone') ||
-      localStorage.getItem('restaurant_online_delivery_phone') ||
-      localStorage.getItem('billpak_online_delivery_phone') ||
-      ''
-    ).trim();
-  } catch {
-    return '';
-  }
-};
-
-const escHtml = (value = '') =>
-  String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-
-const logoHtml = (logo = '') => {
-  const value = String(logo || '').trim();
-  if (!value) return '';
-
-  const src = value.startsWith('data:image')
-    ? value
-    : value.length > 100 && !value.startsWith('http') && !value.startsWith('file://')
-      ? `data:image/png;base64,${value}`
-      : value;
-
-  return `<img class="logo" src="${escHtml(src)}" />`;
-};
-
-const receiptCss = (paperWidth = 80) => {
-  const widthMm = Number(paperWidth) === 58 ? 58 : 80;
-
-  return `
-    *{box-sizing:border-box}
-    html,body{margin:0;padding:0;background:#fff;color:#000;font-family:"Courier New",monospace;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .root{width:${widthMm}mm;margin:0 auto;background:#fff}
-    .receipt{width:${widthMm}mm;padding:3mm 2.5mm 6mm;page-break-after:always;break-after:page}
-    .receipt:last-child{page-break-after:auto;break-after:auto}
-    .logo{display:block;width:34mm;max-height:20mm;object-fit:contain;margin:0 auto 2mm}
-    .restaurant{text-align:center;font-size:18px;line-height:1.15;font-weight:900}
-    .address{text-align:center;font-size:12px;line-height:1.2;margin-top:1mm}
-    .title{text-align:center;font-size:15px;font-weight:900;margin:2mm 0;letter-spacing:.5px}
-    .token{text-align:center;font-size:22px;line-height:1.1;font-weight:900;margin:2mm 0}
-    .sep{border-top:1px dashed #000;margin:2mm 0}
-    .strong{border-top:2px solid #000;margin:2mm 0}
-    .row{display:flex;justify-content:space-between;gap:2mm;font-size:12px;line-height:1.35;margin:.5mm 0}
-    .left{flex:1;min-width:0;overflow-wrap:anywhere}
-    .right{min-width:22mm;text-align:right;white-space:nowrap}
-    .item{font-size:13px;font-weight:900;line-height:1.25;margin-top:2mm;overflow-wrap:anywhere}
-    .urdu{direction:rtl;unicode-bidi:isolate;text-align:right;font-family:Arial,"Noto Nastaliq Urdu","Jameel Noori Nastaleeq","Noto Naskh Arabic",sans-serif;font-size:18px;line-height:1.45;font-weight:900;margin:1mm 0}
-    .center{text-align:center}.bold{font-weight:900}
-    .total{display:flex;justify-content:space-between;font-size:16px;font-weight:900;margin:1.5mm 0}
-    .delivery{text-align:center;font-size:16px;font-weight:900;margin-top:2mm;letter-spacing:.7px}
-    .phone{text-align:center;font-size:15px;font-weight:900;margin-top:1mm}
-    .powered{text-align:center;font-size:12px;margin-top:2mm}
-    @page{size:${widthMm}mm auto;margin:0}
-  `;
-};
-
-const footerHtml = () => {
-  const phone = getOnlineDeliveryPhoneForWeb();
-
-  return `
-    <div class="sep"></div>
-    <div class="center">Thank you!</div>
-    ${phone ? `<div class="delivery">ONLINE DELIVERY</div><div class="phone">${escHtml(phone)}</div>` : ''}
-    <div class="powered">Powered by AMS Crafters</div>
-  `;
-};
-
-const kotHtml = ({ restaurantName, billNo, tokenNo, tableNumber, cashierName, categoryName, items = [], orderType = 'Takeaway' }) => {
-  const dine = orderType === 'Dine-In';
-  const now = new Date().toLocaleString('en-PK');
-
-  return `
-    <section class="receipt">
-      <div class="restaurant">${escHtml(restaurantName || 'BillPak')}</div>
-      <div class="title">${dine ? 'DINE-IN KOT' : 'TAKEAWAY KOT'}</div>
-      ${categoryName ? `<div class="center bold">${escHtml(String(categoryName).toUpperCase())}</div>` : ''}
-      <div class="strong"></div>
-      <div class="token">${dine ? `TABLE ${escHtml(tableNumber || '')}` : `TOKEN #${escHtml(tokenNo || '')}`}</div>
-      <div class="strong"></div>
-      <div class="row"><span class="left">Bill No</span><span class="right">${escHtml(billNo || '')}</span></div>
-      <div class="row"><span class="left">Time</span><span class="right">${escHtml(now)}</span></div>
-      <div class="row"><span class="left">Cashier</span><span class="right">${escHtml(cashierName || 'Cashier')}</span></div>
-      ${categoryName ? `<div class="row"><span class="left">Section</span><span class="right">${escHtml(categoryName)}</span></div>` : ''}
-      <div class="sep"></div>
-      ${(items || []).map(item => `
-        <div class="row bold"><span class="left">${escHtml(item?.name || 'Item')}</span><span class="right">x${Number(item?.quantity || 0)}</span></div>
-        ${item?.nameUrdu ? `<div class="urdu">${escHtml(item.nameUrdu)}</div>` : ''}
-      `).join('')}
-      <div class="sep"></div>
-      <div class="center bold">Kitchen Copy${categoryName ? ` - ${escHtml(categoryName)}` : ''}</div>
-      ${footerHtml()}
-    </section>
-  `;
-};
-
-const invoiceHtml = ({ restaurantName, restaurantAddress, restaurantLogo, billNo, tokenNo, tableNumber, cashierName, cart, items, subtotal, discountAmount, discountType, discountValue, total, orderType = 'Takeaway' }) => {
-  const dine = orderType === 'Dine-In';
-  const now = new Date().toLocaleString('en-PK');
-  const list = Array.isArray(cart) ? cart : Array.isArray(items) ? items : [];
-
-  return `
-    <section class="receipt">
-      ${logoHtml(restaurantLogo)}
-      <div class="restaurant">${escHtml(restaurantName || 'BillPak')}</div>
-      ${restaurantAddress ? `<div class="address">${escHtml(restaurantAddress)}</div>` : ''}
-      <div class="strong"></div>
-      <div class="title">${dine ? 'DINE-IN INVOICE' : 'SALES INVOICE'}</div>
-      <div class="strong"></div>
-      <div class="token">${dine ? `TABLE ${escHtml(tableNumber || tokenNo || '')}` : `TOKEN #${escHtml(tokenNo || '')}`}</div>
-      <div class="sep"></div>
-      <div class="row"><span class="left">Invoice No</span><span class="right">${escHtml(billNo || '')}</span></div>
-      <div class="row"><span class="left">Date/Time</span><span class="right">${escHtml(now)}</span></div>
-      <div class="row"><span class="left">Cashier</span><span class="right">${escHtml(cashierName || 'Cashier')}</span></div>
-      <div class="row"><span class="left">Payment</span><span class="right">Cash</span></div>
-      <div class="row"><span class="left">Order Type</span><span class="right">${escHtml(orderType)}</span></div>
-      <div class="sep"></div>
-      <div class="row bold"><span class="left">ITEM</span><span class="right">TOTAL</span></div>
-      <div class="sep"></div>
-      ${list.map(item => {
-        const qty = Number(item?.quantity || 0);
-        const price = Number(item?.price || 0);
-        const lineTotal = qty * price;
-
-        return `
-          <div class="item">${escHtml(item?.name || 'Item')}${item?.isCustom ? ' *' : ''}</div>
-          ${item?.nameUrdu ? `<div class="urdu">${escHtml(item.nameUrdu)}</div>` : ''}
-          <div class="row"><span class="left">${qty} x Rs ${money(price)}</span><span class="right">Rs ${money(lineTotal)}</span></div>
-        `;
-      }).join('')}
-      <div class="sep"></div>
-      <div class="row"><span class="left">Sub Total</span><span class="right">Rs ${money(subtotal)}</span></div>
-      ${Number(discountAmount || 0) > 0 ? `<div class="row"><span class="left">${discountType === 'percentage' ? `Discount (${escHtml(discountValue)}%)` : 'Discount'}</span><span class="right">-Rs ${money(discountAmount)}</span></div>` : ''}
-      <div class="strong"></div>
-      <div class="total"><span>TOTAL</span><span>Rs ${money(total)}</span></div>
-      <div class="strong"></div>
-      ${footerHtml()}
-    </section>
-  `;
-};
-
-const printHtmlInBrowser = async (html, paperWidth = 80) => {
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    throw new Error('Browser print fallback sirf web browser mein chalega.');
-  }
-
-  const docHtml = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>BillPak Print</title>
-<style>${receiptCss(paperWidth)}</style>
-</head>
-<body>
-<main class="root">${html}</main>
-<script>
-window.onload = function() {
-  setTimeout(function() {
-    window.focus();
-    window.print();
-  }, 350);
-};
-</script>
-</body>
-</html>`;
-
-  const printWindow = window.open('', '_blank');
-
-  if (!printWindow) {
-    throw new Error('Popup blocked hai. Browser settings mein popups allow karo.');
-  }
-
-  printWindow.document.open();
-  printWindow.document.write(docHtml);
-  printWindow.document.close();
-
-  return true;
-};
-
 export const printKotThenInvoiceWeb = async ({
   restaurantName,
   restaurantAddress,
@@ -1037,36 +843,9 @@ export const printKotThenInvoiceWeb = async ({
   total,
   printerName,
 }) => {
-  const settings = getWebPrinterSettings();
-
-  if (isTabletBrowser()) {
-    const paperWidth = settings.paperWidth || 80;
-    const groups = Object.entries(groupedCart || {});
-    const kotReceipts = groups.map(([categoryName, items]) =>
-      kotHtml({ restaurantName, billNo, tokenNo, cashierName, categoryName, items, orderType: 'Takeaway' })
-    ).join('');
-
-    const invoiceReceipt = invoiceHtml({
-      restaurantName,
-      restaurantAddress,
-      restaurantLogo,
-      billNo,
-      tokenNo,
-      cashierName,
-      cart,
-      subtotal,
-      discountAmount,
-      discountType,
-      discountValue,
-      total,
-      orderType: 'Takeaway',
-    });
-
-    return printHtmlInBrowser(`${kotReceipts}${invoiceReceipt}`, paperWidth);
-  }
-
   await connectQzTray();
 
+  const settings = getWebPrinterSettings();
   const selectedPrinterName = await getPrinterName(printerName);
   const config = createPrinterConfig(selectedPrinterName);
 
@@ -1295,17 +1074,9 @@ export const printDineInKotWeb = async ({
   items,
   printerName,
 }) => {
-  const settings = getWebPrinterSettings();
-
-  if (isTabletBrowser()) {
-    return printHtmlInBrowser(
-      kotHtml({ restaurantName, billNo, tableNumber, cashierName, items, orderType: 'Dine-In' }),
-      settings.paperWidth || 80
-    );
-  }
-
   await connectQzTray();
 
+  const settings = getWebPrinterSettings();
   const selectedPrinterName = await getPrinterName(printerName);
   const config = createPrinterConfig(selectedPrinterName);
 
@@ -1344,31 +1115,9 @@ export const printDineInInvoiceWeb = async ({
   total,
   printerName,
 }) => {
-  const settings = getWebPrinterSettings();
-
-  if (isTabletBrowser()) {
-    return printHtmlInBrowser(
-      invoiceHtml({
-        restaurantName,
-        restaurantAddress,
-        restaurantLogo,
-        billNo,
-        tableNumber,
-        cashierName,
-        items,
-        subtotal,
-        discountAmount,
-        discountType,
-        discountValue,
-        total,
-        orderType: 'Dine-In',
-      }),
-      settings.paperWidth || 80
-    );
-  }
-
   await connectQzTray();
 
+  const settings = getWebPrinterSettings();
   const selectedPrinterName = await getPrinterName(printerName);
   const config = createPrinterConfig(selectedPrinterName);
 
@@ -1400,24 +1149,9 @@ export const printDineInInvoiceWeb = async ({
 };
 
 export const testWebPrinter = async ({ printerName } = {}) => {
-  const settings = getWebPrinterSettings();
-
-  if (isTabletBrowser()) {
-    return printHtmlInBrowser(
-      `<section class="receipt">
-        <div class="restaurant">BillPak Printer Test</div>
-        <div class="sep"></div>
-        <div class="center">Tablet Browser Print Mode</div>
-        <div class="urdu">اردو ٹیسٹ</div>
-        <div class="sep"></div>
-        <div class="powered">Powered by AMS Crafters</div>
-      </section>`,
-      settings.paperWidth || 80
-    );
-  }
-
   await connectQzTray();
 
+  const settings = getWebPrinterSettings();
   const selectedPrinterName = await getPrinterName(printerName);
   const config = createPrinterConfig(selectedPrinterName);
   const width = getReceiptWidth(settings.paperWidth || 80);

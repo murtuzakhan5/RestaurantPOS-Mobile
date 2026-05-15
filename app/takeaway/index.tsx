@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -20,7 +20,6 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import api from '../services/api';
-import ViewShot from 'react-native-view-shot';
 
 declare const require: any;
 
@@ -51,7 +50,6 @@ interface Product {
   id: number;
   name: string;
   nameUrdu?: string | null;
-  nameUrduImageBase64?: string | null;
   price: number;
   categoryId: number;
   categoryName?: string;
@@ -63,7 +61,6 @@ interface CartItem {
   productId: number;
   name: string;
   nameUrdu?: string | null;
-  nameUrduImageBase64?: string | null;
   price: number;
   quantity: number;
   categoryId: number;
@@ -161,7 +158,6 @@ export default function TakeAwayScreen() {
   const [quickBillPrice, setQuickBillPrice] = useState('');
   const [quickBillErrors, setQuickBillErrors] = useState<QuickBillErrors>({});
   const [appDialog, setAppDialog] = useState<AppDialogState>(emptyDialog);
-  const urduCaptureRefs = useRef<Record<string, any>>({});
 
   useEffect(() => {
     loadData();
@@ -356,9 +352,9 @@ export default function TakeAwayScreen() {
     return category?.name || 'General Kitchen';
   };
 
-  const groupCartByCategory = (sourceCart: CartItem[] = cart) => {
+  const groupCartByCategory = () => {
     const grouped: Record<string, CartItem[]> = {};
-    sourceCart.forEach(item => {
+    cart.forEach(item => {
       const key = item.categoryName || 'General Kitchen';
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(item);
@@ -668,42 +664,6 @@ export default function TakeAwayScreen() {
     return response.data;
   };
 
-  const getUrduCaptureKey = (item: CartItem) =>
-    `${item.productId}_${item.name}_${item.price}`;
-
-  const attachUrduImagesToCart = async (sourceCart: CartItem[]) => {
-    if (Platform.OS === 'web') return sourceCart;
-
-    // Give hidden ViewShot components a short moment to render.
-    await new Promise(resolve => setTimeout(resolve, 180));
-
-    const result: CartItem[] = [];
-
-    for (const item of sourceCart) {
-      if (!item.nameUrdu) {
-        result.push(item);
-        continue;
-      }
-
-      try {
-        const key = getUrduCaptureKey(item);
-        const ref = urduCaptureRefs.current[key];
-
-        if (ref?.capture) {
-          const base64 = await ref.capture();
-          result.push({ ...item, nameUrduImageBase64: base64 });
-        } else {
-          result.push(item);
-        }
-      } catch (error) {
-        console.log('Urdu image capture failed:', error);
-        result.push(item);
-      }
-    }
-
-    return result;
-  };
-
   const printDirectByPlatform = async (printPayload: any) => {
     if (Platform.OS === 'web') {
       const { printKotThenInvoiceWeb } = require('../services/webPrinterService');
@@ -752,8 +712,6 @@ export default function TakeAwayScreen() {
       const printCashierName = await getPrintCashierName();
       const { restaurantName, restaurantAddress, restaurantLogo } = await getRestaurantPrintInfo();
 
-      const cartWithUrduImages = await attachUrduImagesToCart(cart);
-
       const printPayload: any = {
         restaurantName,
         restaurantAddress,
@@ -762,8 +720,8 @@ export default function TakeAwayScreen() {
         tokenNo,
         cashierName: printCashierName,
         canUseUrduProductNames,
-        groupedCart: groupCartByCategory(cartWithUrduImages),
-        cart: cartWithUrduImages,
+        groupedCart: groupCartByCategory(),
+        cart,
         subtotal: getSubTotal(),
         discountAmount: getDiscountAmount(),
         discountType,
@@ -1067,35 +1025,6 @@ await printDirectByPlatform(printPayload);
     </View>
   );
 
-  const renderUrduCaptureViews = () => {
-    if (Platform.OS === 'web') return null;
-
-    return (
-      <View pointerEvents="none" style={styles.urduCaptureWrapper}>
-        {cart
-          .filter(item => Boolean(item.nameUrdu))
-          .map(item => {
-            const key = getUrduCaptureKey(item);
-
-            return (
-              <ViewShot
-                key={key}
-                ref={(ref: any) => {
-                  if (ref) urduCaptureRefs.current[key] = ref;
-                }}
-                options={{ format: 'png', quality: 1, result: 'base64' }}
-                style={styles.urduCaptureShot}
-              >
-                <View collapsable={false} style={styles.urduCapturePaper}>
-                  <Text style={styles.urduCaptureText}>{item.nameUrdu}</Text>
-                </View>
-              </ViewShot>
-            );
-          })}
-      </View>
-    );
-  };
-
   const renderQuickAddModal = () => (
     <Modal animationType="slide" transparent visible={quickAddModalVisible} onRequestClose={() => setQuickAddModalVisible(false)}>
       <View style={styles.modalOverlay}>
@@ -1292,7 +1221,6 @@ await printDirectByPlatform(printPayload);
           </>
         )}
       </View>
-      {renderUrduCaptureViews()}
       {renderQuickAddModal()}
       {renderAppDialog()}
     </>

@@ -221,9 +221,9 @@ const getUrduName = (item = {}) =>
   );
 
 const addUrduLine = (receipt, text) => {
-  // Raw Urdu text is intentionally disabled in APK text mode because it prints garbage on many ESC/POS printers.
-  // Urdu is printed through small captured image lines when nameUrduImageBase64 is available.
-  return receipt;
+  const value = safeText(text);
+  if (!value) return receipt;
+  return `${receipt}${value}\n`;
 };
 
 const getOnlineDeliveryPhoneForPrint = async () => {
@@ -245,163 +245,6 @@ const addOnlineDeliveryFooter = (receipt, width, onlineDeliveryPhone = '') => {
   receipt += `${center('ONLINE DELIVERY', width)}\n`;
   receipt += `${center(phone, width)}\n`;
   return receipt;
-};
-
-const URDU_IMAGE_START = '__BILLPAK_URDU_IMAGE_START__';
-const URDU_IMAGE_END = '__BILLPAK_URDU_IMAGE_END__';
-
-const normalizeBase64Image = (image) => {
-  if (!image || typeof image !== 'string') return null;
-
-  const value = image.trim();
-  if (!value) return null;
-
-  if (value.startsWith('data:image')) {
-    const parts = value.split(',');
-    return parts.length > 1 ? parts[1] : null;
-  }
-
-  if (value.startsWith('file://') || /^https?:\/\//i.test(value)) {
-    return null;
-  }
-
-  return value.length > 100 ? value : null;
-};
-
-const addUrduImageLine = (receipt, imageBase64) => {
-  const cleanImage = normalizeBase64Image(imageBase64);
-  if (!cleanImage) return receipt;
-
-  return `${receipt}${URDU_IMAGE_START}${cleanImage}${URDU_IMAGE_END}\n`;
-};
-
-const printBase64ImageToUsbPrinter = async (base64Image, options = {}) => {
-  const module = loadUsbPrinterModule();
-  const settings = await getWorkingSettings();
-  const cleanBase64 = normalizeBase64Image(base64Image);
-
-  if (!cleanBase64) return false;
-
-  const imageFn =
-    module.printImageBase64 ||
-    module.printImage ||
-    module.printBitmap ||
-    module.printPic ||
-    module.printRasterImage;
-
-  if (typeof imageFn !== 'function') {
-    console.log('USB printer module image function not found. Urdu image skipped.');
-    return false;
-  }
-
-  const payload = {
-    base64Image: cleanBase64,
-    image: cleanBase64,
-    data: cleanBase64,
-    base64: cleanBase64,
-    productId: settings.productId,
-    vendorId: settings.vendorId,
-    deviceId: settings.deviceId,
-    align: options.align || 'center',
-    width: options.width || getImageWidthPx(settings.paperWidth || 80),
-    cut: false,
-    beep: false,
-    tailingLine: true,
-  };
-
-  try {
-    await imageFn(payload);
-    return true;
-  } catch (err) {
-    console.log('USB Urdu image print failed with object payload:', err?.message || err);
-  }
-
-  try {
-    await imageFn(cleanBase64, settings.productId);
-    return true;
-  } catch (err) {
-    console.log('USB Urdu image print failed with fallback payload:', err?.message || err);
-    return false;
-  }
-};
-
-const splitReceiptByUrduImages = (receiptText = '') => {
-  const value = String(receiptText || '');
-  const parts = [];
-  const regex = new RegExp(`${URDU_IMAGE_START}([\\s\\S]*?)${URDU_IMAGE_END}`, 'g');
-
-  let lastIndex = 0;
-  let match = null;
-
-  while ((match = regex.exec(value)) !== null) {
-    const before = value.slice(lastIndex, match.index);
-    if (before) {
-      parts.push({ type: 'text', text: before });
-    }
-
-    if (match[1]) {
-      parts.push({ type: 'image', base64: match[1] });
-    }
-
-    lastIndex = regex.lastIndex;
-  }
-
-  const after = value.slice(lastIndex);
-  if (after) {
-    parts.push({ type: 'text', text: after });
-  }
-
-  return parts;
-};
-
-const sendReceiptToUsbPrinter = async (receiptText, options = {}) => {
-  const parts = splitReceiptByUrduImages(receiptText);
-
-  if (!parts.some(part => part.type === 'image')) {
-    return sendTextToUsbPrinter(receiptText, options);
-  }
-
-  let printedText = false;
-
-  for (let index = 0; index < parts.length; index += 1) {
-    const part = parts[index];
-    const isLast = index === parts.length - 1;
-
-    if (part.type === 'text') {
-      if (!part.text) continue;
-
-      await sendTextToUsbPrinter(part.text, {
-        ...options,
-        cut: isLast ? options.cut : false,
-        beep: isLast ? options.beep : false,
-        tailingLine: isLast ? options.tailingLine : false,
-      });
-
-      printedText = true;
-      continue;
-    }
-
-    if (part.type === 'image') {
-      // Urdu image failure should not break full bill printing.
-      await printBase64ImageToUsbPrinter(part.base64, {
-        width: options.urduImageWidth,
-        align: 'center',
-      });
-    }
-  }
-
-  const lastPart = parts[parts.length - 1];
-
-  if (lastPart?.type === 'image' || !printedText) {
-    await sendTextToUsbPrinter('\n', {
-      ...options,
-      cut: options.cut,
-      beep: options.beep,
-      tailingLine: options.tailingLine,
-    });
-  }
-
-  return true;
 };
 
 export const buildKotText = ({
@@ -438,9 +281,7 @@ export const buildKotText = ({
     receipt += `${line(itemName, `x${qty}`, width)}\n`;
 
     const urduName = getUrduName(item);
-    if (item?.nameUrduImageBase64) {
-      receipt = addUrduImageLine(receipt, item.nameUrduImageBase64);
-    } else if (urduName) {
+    if (urduName) {
       receipt = addUrduLine(receipt, urduName);
     }
   });
@@ -515,9 +356,7 @@ export const buildInvoiceText = ({
     });
 
     const urduName = getUrduName(item);
-    if (item?.nameUrduImageBase64) {
-      receipt = addUrduImageLine(receipt, item.nameUrduImageBase64);
-    } else if (urduName) {
+    if (urduName) {
       receipt = addUrduLine(receipt, urduName);
     }
 
@@ -594,7 +433,7 @@ export const printKotThenInvoiceDirect = async ({
       onlineDeliveryPhone,
     });
 
-    await sendReceiptToUsbPrinter(kotText, {
+    await sendTextToUsbPrinter(kotText, {
       cut: autoCut,
       beep: false,
       tailingLine: true,
@@ -620,7 +459,7 @@ export const printKotThenInvoiceDirect = async ({
     onlineDeliveryPhone,
   });
 
-  await sendReceiptToUsbPrinter(invoiceText, {
+  await sendTextToUsbPrinter(invoiceText, {
     cut: autoCut,
     beep: true,
     tailingLine: true,
@@ -657,9 +496,7 @@ export const buildDineInKotText = ({
     receipt += `${line(item?.name || 'Item', `x${Number(item?.quantity || 0)}`, width)}\n`;
 
     const urduName = getUrduName(item);
-    if (item?.nameUrduImageBase64) {
-      receipt = addUrduImageLine(receipt, item.nameUrduImageBase64);
-    } else if (urduName) {
+    if (urduName) {
       receipt = addUrduLine(receipt, urduName);
     }
   });
@@ -699,7 +536,7 @@ export const printDineInKotDirect = async ({
     onlineDeliveryPhone,
   });
 
-  await sendReceiptToUsbPrinter(kotText, {
+  await sendTextToUsbPrinter(kotText, {
     cut: settings.autoCut !== false,
     beep: false,
     tailingLine: true,
@@ -748,7 +585,7 @@ export const printDineInInvoiceDirect = async ({
     onlineDeliveryPhone,
   });
 
-  await sendReceiptToUsbPrinter(invoiceText, {
+  await sendTextToUsbPrinter(invoiceText, {
     cut: settings.autoCut !== false,
     beep: true,
     tailingLine: true,

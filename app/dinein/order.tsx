@@ -10,7 +10,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import api from '../services/api';
-import ViewShot from 'react-native-view-shot';
 
 const { width } = Dimensions.get('window');
 const isMobile = width < 768;
@@ -25,7 +24,6 @@ interface Category {
 interface Product {
   id: number;
   name: string;
-  nameUrdu?: string | null;
   price: number;
   image?: string | null;
   categoryId?: number;
@@ -35,8 +33,6 @@ interface Product {
 interface CartItem {
   productId: number;
   name: string;
-  nameUrdu?: string | null;
-  nameUrduImageBase64?: string | null;
   price: number;
   quantity: number;
   image?: string | null;
@@ -142,7 +138,6 @@ export default function DineInOrderScreen() {
   const [appDialog, setAppDialog] = useState<AppDialogState>(emptyDialog);
 
   const kotPrintLockRef = useRef(false);
-  const urduCaptureRefs = useRef<Record<string, any>>({});
 
   useEffect(() => {
     loadAll();
@@ -358,7 +353,7 @@ export default function DineInOrderScreen() {
           c.productId === productId ? { ...c, quantity: c.quantity + 1 } : c
         );
       }
-      return [...prev, { productId, name: product.name, nameUrdu: product.nameUrdu || null, price, quantity: 1, image: product.image, isCustom: false }];
+      return [...prev, { productId, name: product.name, price, quantity: 1, image: product.image, isCustom: false }];
     });
   };
 
@@ -549,41 +544,6 @@ export default function DineInOrderScreen() {
     return true;
   };
 
-  const getUrduCaptureKey = (item: CartItem) =>
-    `${item.productId}_${item.name}_${item.price}`;
-
-  const attachUrduImagesToCart = async (sourceCart: CartItem[]) => {
-    if (Platform.OS === 'web') return sourceCart;
-
-    await new Promise(resolve => setTimeout(resolve, 180));
-
-    const result: CartItem[] = [];
-
-    for (const item of sourceCart) {
-      if (!item.nameUrdu) {
-        result.push(item);
-        continue;
-      }
-
-      try {
-        const key = getUrduCaptureKey(item);
-        const ref = urduCaptureRefs.current[key];
-
-        if (ref?.capture) {
-          const base64 = await ref.capture();
-          result.push({ ...item, nameUrduImageBase64: base64 });
-        } else {
-          result.push(item);
-        }
-      } catch (error) {
-        console.log('Dine-in Urdu capture failed:', error);
-        result.push(item);
-      }
-    }
-
-    return result;
-  };
-
   const printKOT = async () => {
     if (kotPrintLockRef.current || printing) return;
     if (cart.length === 0) {
@@ -603,13 +563,9 @@ export default function DineInOrderScreen() {
       const timeStr = now.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
       const dateStr = now.toLocaleDateString('en-PK');
       const printCashierName = await getPrintCashierName();
-      const cartWithUrduImages = await attachUrduImagesToCart(cart);
-
-      const safeCart = cartWithUrduImages.map(item => ({
+      const safeCart = cart.map(item => ({
         productId: Number(item.productId),
         name: item.name,
-        nameUrdu: item.nameUrdu || null,
-        nameUrduImageBase64: item.nameUrduImageBase64 || null,
         price: Number(item.price),
         quantity: Number(item.quantity),
         isCustom: Boolean(item.isCustom),
@@ -773,35 +729,6 @@ export default function DineInOrderScreen() {
       </TouchableOpacity>
     </View>
   );
-
-  const renderUrduCaptureViews = () => {
-    if (Platform.OS === 'web') return null;
-
-    return (
-      <View pointerEvents="none" style={styles.urduCaptureWrapper}>
-        {cart
-          .filter(item => Boolean(item.nameUrdu))
-          .map(item => {
-            const key = getUrduCaptureKey(item);
-
-            return (
-              <ViewShot
-                key={key}
-                ref={(ref: any) => {
-                  if (ref) urduCaptureRefs.current[key] = ref;
-                }}
-                options={{ format: 'png', quality: 1, result: 'base64' }}
-                style={styles.urduCaptureShot}
-              >
-                <View collapsable={false} style={styles.urduCapturePaper}>
-                  <Text style={styles.urduCaptureText}>{item.nameUrdu}</Text>
-                </View>
-              </ViewShot>
-            );
-          })}
-      </View>
-    );
-  };
 
   const filteredProducts = products
     .filter(p => selectedCategory === 'all' || Number(p.categoryId) === Number(selectedCategory))
@@ -1128,7 +1055,6 @@ export default function DineInOrderScreen() {
           )}
         </View>
       </View>
-      {renderUrduCaptureViews()}
       {renderCustomItemModal()}
       {renderAppDialog()}
     </>
