@@ -33,6 +33,26 @@ import {
 const LOGO_KEY = 'restaurant_logo';
 const ONLINE_DELIVERY_PHONE_KEY = 'online_delivery_phone';
 
+const getWebLocalStorageValue = (key: string) => {
+  try {
+    if (Platform.OS !== 'web') return '';
+    const storage = (globalThis as any)?.localStorage;
+    return storage?.getItem?.(key) || '';
+  } catch {
+    return '';
+  }
+};
+
+const setWebLocalStorageValue = (key: string, value: string) => {
+  try {
+    if (Platform.OS !== 'web') return;
+    const storage = (globalThis as any)?.localStorage;
+    storage?.setItem?.(key, value || '');
+  } catch {
+    // ignore web localStorage errors
+  }
+};
+
 const showApiError = (
   error: any,
   fallback = 'Something went wrong'
@@ -113,6 +133,9 @@ export default function ProfessionalPOSSettingsScreen() {
 
       const restaurant = response.data?.restaurant || {};
       const savedOnlineDeliveryPhone =
+        getWebLocalStorageValue(ONLINE_DELIVERY_PHONE_KEY) ||
+        getWebLocalStorageValue('restaurant_online_delivery_phone') ||
+        getWebLocalStorageValue('billpak_online_delivery_phone') ||
         (await AsyncStorage.getItem(ONLINE_DELIVERY_PHONE_KEY)) ||
         (await AsyncStorage.getItem('restaurant_online_delivery_phone')) ||
         '';
@@ -164,6 +187,21 @@ export default function ProfessionalPOSSettingsScreen() {
 
       await AsyncStorage.setItem(
         'restaurant_online_delivery_phone',
+        profile.onlineDeliveryPhone || ''
+      );
+
+      setWebLocalStorageValue(
+        ONLINE_DELIVERY_PHONE_KEY,
+        profile.onlineDeliveryPhone || ''
+      );
+
+      setWebLocalStorageValue(
+        'restaurant_online_delivery_phone',
+        profile.onlineDeliveryPhone || ''
+      );
+
+      setWebLocalStorageValue(
+        'billpak_online_delivery_phone',
         profile.onlineDeliveryPhone || ''
       );
 
@@ -472,7 +510,7 @@ export default function ProfessionalPOSSettingsScreen() {
             />
 
             <Text style={styles.helperText}>
-              Ye number invoice/KOT footer mein “ONLINE DELIVERY” ke neeche print hoga.
+              Ye number sales invoice par “For Online Delivery” ke neeche print hoga. KOT par print nahi hoga.
             </Text>
 
             <TouchableOpacity
@@ -654,7 +692,7 @@ export default function ProfessionalPOSSettingsScreen() {
             {!!profile.onlineDeliveryPhone && (
               <>
                 <Text style={styles.previewDeliveryTitle}>
-                  ONLINE DELIVERY
+                  For Online Delivery
                 </Text>
 
                 <Text style={styles.previewDeliveryPhone}>

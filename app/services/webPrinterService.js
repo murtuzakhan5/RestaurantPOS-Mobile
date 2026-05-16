@@ -178,8 +178,10 @@ const wrapText = (text, width = 42) => {
 };
 
 const pushCenteredWrapped = (data, text, width) => {
+  data.push(alignCenter());
   wrapText(text, width).forEach((lineText) => {
-    data.push(`${center(lineText, width)}\n`);
+    data.push(`${safeText(lineText)}
+`);
   });
 };
 
@@ -187,6 +189,20 @@ const pushLeftWrapped = (data, text, width) => {
   wrapText(text, width).forEach((lineText) => {
     data.push(`${lineText}\n`);
   });
+};
+
+const pushCenteredLine = (data, text, width) => {
+  data.push(alignCenter());
+  data.push(`${safeText(text)}
+`);
+};
+
+const pushCenteredDoubleLine = (data, text, width) => {
+  data.push(alignCenter());
+  data.push(doubleSize());
+  data.push(`${safeText(text)}
+`);
+  data.push(normalSize());
 };
 
 const createUrduTextImageBase64 = async (text, paperWidth = 80) => {
@@ -556,6 +572,43 @@ const pushLogoIfBase64 = (data, restaurantLogo) => {
   data.push('\n');
 };
 
+const getOnlineDeliveryPhoneForWeb = () => {
+  try {
+    if (typeof localStorage === 'undefined') return '';
+
+    return (
+      localStorage.getItem('online_delivery_phone') ||
+      localStorage.getItem('restaurant_online_delivery_phone') ||
+      localStorage.getItem('billpak_online_delivery_phone') ||
+      ''
+    ).trim();
+  } catch {
+    return '';
+  }
+};
+
+const pushOnlineDeliveryInvoiceBlock = (data, width) => {
+  const phone = getOnlineDeliveryPhoneForWeb();
+
+  if (!phone) return;
+
+  data.push(alignCenter());
+  data.push(boldOn());
+
+  // Title small/normal size
+  data.push(normalSize());
+  data.push(`${center('For Online Delivery', width)}
+`);
+
+  // Contact number bigger than title
+  data.push(doubleSize());
+  data.push(`${center(phone, Math.floor(width / 2))}
+`);
+
+  data.push(normalSize());
+  data.push(boldOff());
+};
+
 const buildKotCommands = async ({
   restaurantName,
   billNo,
@@ -574,14 +627,16 @@ const buildKotCommands = async ({
   data.push(alignCenter());
   data.push(boldOn());
   pushCenteredWrapped(data, restaurantName || 'BillPak', width);
-  data.push('TAKEAWAY KOT\n');
+  pushCenteredLine(data, 'TAKEAWAY KOT', width);
   pushCenteredWrapped(data, String(categoryName || 'Kitchen').toUpperCase(), width);
   data.push(boldOff());
 
+  data.push(alignCenter());
   data.push(`${separator(width, '=')}\n`);
-  data.push(doubleSize());
-  data.push(`TOKEN #${tokenNo}\n`);
-  data.push(normalSize());
+  data.push(boldOn());
+  pushCenteredDoubleLine(data, `TOKEN #${tokenNo}`, width);
+  data.push(boldOff());
+  data.push(alignCenter());
   data.push(`${separator(width, '=')}\n`);
 
   data.push(alignLeft());
@@ -647,17 +702,19 @@ const buildInvoiceCommands = async ({
     pushCenteredWrapped(data, restaurantAddress, width);
   }
 
+  data.push(alignCenter());
   data.push(`${starSeparator(width)}\n`);
   data.push(boldOn());
-  data.push(`${center('TAKEAWAY INVOICE', width)}\n`);
+  pushCenteredLine(data, 'TAKEAWAY INVOICE', width);
   data.push(boldOff());
+  data.push(alignCenter());
   data.push(`${starSeparator(width)}\n`);
 
+  data.push(alignCenter());
   data.push(boldOn());
-  data.push(doubleSize());
-  data.push(`${center(`TOKEN #${tokenNo}`, width)}\n`);
-  data.push(normalSize());
+  pushCenteredDoubleLine(data, `TOKEN #${tokenNo}`, width);
   data.push(boldOff());
+  data.push(alignCenter());
   data.push(`${separator(width, '~')}\n`);
 
   data.push(alignLeft());
@@ -710,6 +767,7 @@ const buildInvoiceCommands = async ({
   data.push(alignCenter());
   data.push(`\n${center('Thank you for ordering!', width)}\n`);
   data.push(separator(width) + '\n');
+  pushOnlineDeliveryInvoiceBlock(data, width);
   data.push(`${center('Powered by BillPak', width)}\n`);
 
   addBottomMargin(data);
@@ -925,13 +983,15 @@ const buildDineInKotCommands = async ({
   data.push(alignCenter());
   data.push(boldOn());
   pushCenteredWrapped(data, restaurantName || 'BillPak', width);
-  data.push('DINE-IN KOT\n');
+  pushCenteredLine(data, 'DINE-IN KOT', width);
   data.push(boldOff());
 
+  data.push(alignCenter());
   data.push(`${separator(width, '=')}\n`);
-  data.push(doubleSize());
-  data.push(`${center(`TABLE ${tableNumber || ''}`, Math.floor(width / 2))}\n`);
-  data.push(normalSize());
+  data.push(boldOn());
+  pushCenteredDoubleLine(data, `TABLE ${tableNumber || ''}`, width);
+  data.push(boldOff());
+  data.push(alignCenter());
   data.push(`${separator(width, '=')}\n`);
 
   data.push(alignLeft());
@@ -995,17 +1055,19 @@ const buildDineInInvoiceCommands = async ({
     pushCenteredWrapped(data, restaurantAddress, width);
   }
 
+  data.push(alignCenter());
   data.push(`${starSeparator(width)}\n`);
   data.push(boldOn());
-  data.push(`${center('DINE-IN INVOICE', width)}\n`);
+  pushCenteredLine(data, 'DINE-IN INVOICE', width);
   data.push(boldOff());
+  data.push(alignCenter());
   data.push(`${starSeparator(width)}\n`);
 
+  data.push(alignCenter());
   data.push(boldOn());
-  data.push(doubleSize());
-  data.push(`${center(`TABLE ${tableNumber || ''}`, Math.floor(width / 2))}\n`);
-  data.push(normalSize());
+  pushCenteredDoubleLine(data, `TABLE ${tableNumber || ''}`, width);
   data.push(boldOff());
+  data.push(alignCenter());
   data.push(`${separator(width, '~')}\n`);
 
   data.push(alignLeft());
@@ -1058,6 +1120,7 @@ const buildDineInInvoiceCommands = async ({
   data.push(alignCenter());
   data.push(`\n${center('Thank you for dining with us!', width)}\n`);
   data.push(separator(width) + '\n');
+  pushOnlineDeliveryInvoiceBlock(data, width);
   data.push(`${center('Powered by BillPak', width)}\n`);
 
   addBottomMargin(data);
@@ -1170,8 +1233,9 @@ export const testWebPrinter = async ({ printerName } = {}) => {
 
   await pushUrduImage(data, 'اردو ٹیسٹ', settings.paperWidth || 80);
 
+  data.push(separator(width) + '\n');
+  pushOnlineDeliveryInvoiceBlock(data, width);
   data.push(
-    separator(width) + '\n',
     'Powered by BillPak\n',
     ...Array(10).fill('\n'),
     settings.autoCut !== false ? cutPaper() : ''
